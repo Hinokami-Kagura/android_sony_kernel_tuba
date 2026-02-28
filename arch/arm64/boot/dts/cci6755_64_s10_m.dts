@@ -26,7 +26,6 @@
 	};
 	led0:led@0 {
 		compatible = "mediatek,red";
-        
 		led_mode = <3>;
 		data = <1>;
 		pwm_config = <0 0 0 0 0>;

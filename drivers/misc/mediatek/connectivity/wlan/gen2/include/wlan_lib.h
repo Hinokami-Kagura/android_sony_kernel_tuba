@@ -390,6 +390,23 @@ extern BOOLEAN fgIsResetting;
 #define WLAN_TX_THREAD_TASK_PRIORITY        0	/* If not setting the priority, 0 is the default */
 #define WLAN_TX_THREAD_TASK_NICE            (-10)	/* If not setting the nice, -10 is the default */
 
+#define MAX_CMD_ITEM_MAX 			4 	/* Max item per cmd. */
+#define MAX_CMD_NAME_MAX_LENGTH		32	/* Max name string length */
+#define MAX_CMD_VALUE_MAX_LENGTH	32 	/* Max value string length */
+#define MAX_CMD_TYPE_LENGTH			1
+#define MAX_CMD_STRING_LENGTH		1
+#define MAX_CMD_VALUE_LENGTH		1
+#define MAX_CMD_RESERVE_LENGTH		1
+
+
+#define CMD_FORMAT_V1_LENGTH	(MAX_CMD_NAME_MAX_LENGTH + MAX_CMD_VALUE_MAX_LENGTH + MAX_CMD_TYPE_LENGTH + MAX_CMD_STRING_LENGTH + MAX_CMD_VALUE_LENGTH + MAX_CMD_RESERVE_LENGTH)
+
+#define MAX_CMD_BUFFER_LENGTH	(CMD_FORMAT_V1_LENGTH * MAX_CMD_ITEM_MAX)
+
+#define ITEM_TYPE_DEC	1
+#define ITEM_TYPE_HEX	2
+#define ITEM_TYPE_STR	3
+
 /*******************************************************************************
 *                             D A T A   T Y P E S
 ********************************************************************************
@@ -411,6 +428,32 @@ typedef enum _ENUM_CSUM_RESULT_T {
 	CSUM_RES_FAILED,
 	CSUM_RES_NUM
 } ENUM_CSUM_RESULT_T, *P_ENUM_CSUM_RESULT_T;
+
+typedef struct _CMD_FORMAT_V1_T{
+	UINT_8 itemType;
+	UINT_8 itemStringLength;
+	UINT_8 itemValueLength;
+	UINT_8 Reserved;
+	UINT_8 itemString[MAX_CMD_NAME_MAX_LENGTH];
+	UINT_8 itemValue[MAX_CMD_VALUE_MAX_LENGTH];
+} CMD_FORMAT_V1_T, *P_CMD_FORMAT_V1_T;
+typedef enum _CMD_VER_T {
+	CMD_VER_1,	/* Type[2]+String[32]+Value[32] */
+	CMD_VER_2	/* for furtur define. */
+} CMD_VER_T, *P_CMD_VER_T;
+
+typedef enum _CMD_TYPE_T {
+	CMD_TYPE_QUERY,
+	CMD_TYPE_SET
+} CMD_TYPE_T, *P_CMD_TYPE_T;
+
+typedef struct _CMD_HEADER_T {
+	CMD_VER_T	cmdVersion;
+	CMD_TYPE_T	cmdType;
+	UINT_8	itemNum;
+	UINT_16	cmdBufferLen;
+	UINT_8	buffer[MAX_CMD_BUFFER_LENGTH];
+} CMD_HEADER_T, *P_CMD_HEADER_T;
 
 typedef enum _ENUM_PHY_MODE_T {
 	ENUM_PHY_2G4_CCK,

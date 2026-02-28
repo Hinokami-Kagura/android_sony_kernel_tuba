@@ -554,6 +554,7 @@ ssize_t amdtxctrl_pid_write(struct file *filp, const char __user *buf, unsigned 
 	char tmp[MAX_LEN] = { 0 };
 
 	/* write data to the buffer */
+	len = (len < (MAX_LEN - 1)) ? len : (MAX_LEN - 1);
 	if (copy_from_user(tmp, buf, len))
 		return -EFAULT;
 

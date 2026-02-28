@@ -9594,6 +9594,85 @@ wlanoidSetPta(IN P_ADAPTER_T prAdapter, IN PVOID pvSetBuffer, IN UINT_32 u4SetBu
 
 #endif
 
+WLAN_STATUS
+wlanoidSetDropPacketsFilterEnable (
+	IN	P_ADAPTER_T prAdapter,
+	IN	PVOID		pvSetBuffer,
+	IN	UINT_32 	u4SetBufferLen,
+	OUT PUINT_32	pu4SetInfoLen
+	)
+{
+
+	WLAN_STATUS rStatus;
+
+	DEBUGFUNC("wlanoidSetDropPacketsFilterEnable");
+
+	ASSERT(prAdapter);
+	ASSERT(pvSetBuffer);
+
+	rStatus = wlanSendSetQueryCmd(
+		prAdapter,				/* prAdapter */
+		CMD_ID_GET_SET_CUSTOMER_CFG,	/* 0x70 */
+		TRUE,					/* fgSetQuery */
+		FALSE,					/* fgNeedResp */
+		FALSE,					/* fgIsOid */
+		NULL,					/* pfCmdDoneHandler*/
+		NULL,	/* pfCmdTimeoutHandler */
+		u4SetBufferLen,	/* u4SetQueryInfoLen */
+		(PUINT_8) pvSetBuffer, /* pucInfoBuffer */
+		NULL,	/* pvSetQueryBuffer */
+		0	/* u4SetQueryBufferLen */
+	);
+	
+	ASSERT(rStatus == WLAN_STATUS_PENDING);
+	if(rStatus == WLAN_STATUS_FAILURE) {
+		DBGLOG(OID, ERROR,"rStatus=%d\n", rStatus);
+	}	
+
+	return rStatus;
+
+}
+
+
+WLAN_STATUS
+wlanoidSetPacketFilterPriv (
+	IN	P_ADAPTER_T prAdapter,
+	IN	PVOID		pvSetBuffer,
+	IN	UINT_32 	u4SetBufferLen,
+	OUT PUINT_32	pu4SetInfoLen
+	)
+{
+
+	WLAN_STATUS rStatus;
+
+	DEBUGFUNC("wlanoidSetPacketFilter");
+
+	ASSERT(prAdapter);
+	ASSERT(pvSetBuffer);
+	
+	rStatus = wlanSendSetQueryCmd (
+				prAdapter,					/* prAdapter */
+				CMD_ID_SET_DROP_PACKET_CFG,	/* ucCID */
+				TRUE,						/* fgSetQuery */
+				FALSE,						/* fgNeedResp */
+				TRUE,						/* fgIsOid */
+				nicCmdEventSetCommon,		/* pfCmdDoneHandler*/
+				nicOidCmdTimeoutCommon, 	/* pfCmdTimeoutHandler */
+				u4SetBufferLen, 			/* u4SetQueryInfoLen */
+				(PUINT_8) pvSetBuffer,		/* pucInfoBuffer */
+				NULL,						/* pvSetQueryBuffer */
+				0							/* u4SetQueryBufferLen */
+				);
+	
+	ASSERT(rStatus == WLAN_STATUS_PENDING);
+	if(rStatus == WLAN_STATUS_FAILURE) {
+		DBGLOG(OID, ERROR,"rStatus=%d\n", rStatus);
+	}
+
+	return rStatus;
+
+}
+
 /*----------------------------------------------------------------------------*/
 /*!
 * \brief This routine is called to set Tx power profile.

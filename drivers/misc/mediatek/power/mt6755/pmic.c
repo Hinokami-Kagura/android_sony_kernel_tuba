@@ -92,18 +92,12 @@
 #include <mach/mt_pmic.h>
 #include <mt-plat/mt_reboot.h>
 #include <mach/mt_charging.h>
-//CEI comments start
-
-//CEI comments start
-
 //#include <mt-plat/mt_gpio.h>
 //#include <mt-plat/mt_gpio_core.h>
 //#include <mach/gpio_const.h>
 //extern int get_led_control_state(void);
 //extern int get_gpio_init_state(void);
 //extern struct mutex led_control_mutex;
-//CEI comments end
-//CEI comments end
 /*****************************************************************************
  * PMIC extern variable
  ******************************************************************************/
@@ -763,10 +757,6 @@ unsigned int upmu_get_rgs_chrdet(void)
 	/*val = mt6325_upmu_get_rgs_chrdet();*/
 	val = pmic_get_register_value(PMIC_RGS_CHRDET);
 	PMICLOG("[upmu_get_rgs_chrdet] CHRDET status = %d\n", val);
-    //CEI comments start
-    
-	//CEI comments start
-    
 	//mutex_lock(&led_control_mutex);
     //if (get_gpio_init_state() == 1 && get_led_control_state() == 0) {
     //    if (val == 1 && mt_get_gpio_out(108) == 1) {
@@ -778,8 +768,6 @@ unsigned int upmu_get_rgs_chrdet(void)
   	//    }
 	//}
     //mutex_unlock(&led_control_mutex);    
-	//CEI comments end
-    //CEI comments end
 	return val;
 }
 

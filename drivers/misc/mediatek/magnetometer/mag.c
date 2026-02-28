@@ -83,7 +83,7 @@ static void mag_work_func(struct work_struct *work)
 	get_monotonic_boottime(&time);
 	cur_ns = time.tv_sec*1000000000LL+time.tv_nsec;
 
-#if 1   //henry add for DMS06710308 Screen activation from sleep mode is extremely slow
+#if 1
     if(g_iAddSkipMag ==1)
     {
 	ii = atomic_read(&g_iIsSuspend);

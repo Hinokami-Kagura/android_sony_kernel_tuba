@@ -243,7 +243,6 @@ struct stk8313_i2c_data {
 #if defined(CONFIG_HAS_EARLYSUSPEND)
     struct early_suspend    early_drv;
 #endif     
-
     //atomic_t				event_since_en;
 };
 /*----------------------------------------------------------------------------*/
@@ -647,7 +646,7 @@ static int STK8313_ReadData(struct i2c_client *client, s16 data[STK8313_AXES_NUM
 		data[STK8313_AXIS_Z] += priv->offset[STK8313_AXIS_Z];
 #endif
 
-#if 1   //fix Acc sensor not stable in Camera -> AR effect -> Tuturial..
+#if 1
 		acc_xyz[STK8313_AXIS_X] = (int) data[STK8313_AXIS_X];
 		acc_xyz[STK8313_AXIS_Y] = (int) data[STK8313_AXIS_Y];
 		acc_xyz[STK8313_AXIS_Z] = (int) data[STK8313_AXIS_Z];
@@ -1625,7 +1624,7 @@ static int STK8313_Init(struct i2c_client *client, int reset_cali)
 
 	//Printhh("[%s] call STK831X_SetDelay()\n", __FUNCTION__);
 	//res = STK831X_SetDelay(client, STK831X_INIT_ODR);		
-	res = STK831X_SetDelay(client, 2);	//100 Hz
+	res = STK831X_SetDelay(client, 2);	//100 HZ
 	Printhh("[%s] call STK831X_SetDelay(2:100Hz)\n", __FUNCTION__);
 	if(res != STK831X_SUCCESS)
 	{
@@ -1663,7 +1662,6 @@ static int STK8313_Init(struct i2c_client *client, int reset_cali)
 	//mdelay(g_iDelayStk);
 	//Printhh("[%s] stk8313 Init OK..\n", __FUNCTION__);
 
-        //fix Acc sensor not stable in Camera -> AR effect -> Tuturial..
 	//Printhh("[%s] reset obj->fir sizeof()=%d\n", __FUNCTION__, (int)sizeof(obj->fir));
 	memset(&obj->fir, 0x00, sizeof(obj->fir));
 
@@ -2641,8 +2639,6 @@ static long stk8313_unlocked_ioctl(struct file *file, unsigned int cmd,
 				err = -EINVAL;
 				break;	  
 			}
-			//CTS Single Sensor Tests : Fail
-			//G-sensor does not work (has side effect)
 			#if 0
 			if(atomic_read(&obj->event_since_en) < 15){// wait 1000ms, auto-rotation 1000/66 = 15
 				atomic_add(1, &obj->event_since_en);	
@@ -2650,7 +2646,7 @@ static long stk8313_unlocked_ioctl(struct file *file, unsigned int cmd,
 			}
 			#endif
 
-			mutex_lock(&gsensor_mutex);//G-sensor does not work
+			mutex_lock(&gsensor_mutex);
 			//Printhh("[%s] >> enter mutex_lock..\n", __FUNCTION__);
 			STK8313_ReadSensorData(client, strbuf, STK8313_BUFSIZE);
 			mutex_unlock(&gsensor_mutex);
@@ -3110,7 +3106,7 @@ static int gsensor_set_delay(u64 ns)
 	}
 #endif
 
-#if 1   //fix Acc sensor not stable in Camera -> AR effect -> Tuturial..
+#if 1
 	//Printhh("[%s] reset  fir.num idx sum[0-2]\n", __FUNCTION__);
 	obj_i2c_data->fir.num = 0;
 	obj_i2c_data->fir.idx = 0;
@@ -3135,8 +3131,7 @@ static int gsensor_get_data(int *x, int *y, int *z, int *status)
 
 	//Printhh("[%s] enter..11\n", __FUNCTION__);
 
-	//Sensor Tests : Fail
-#if 0   //G-sensor does not work (has side effect)
+#if 0
 	//ii = atomic_read(&obj->event_since_en);
 	if(atomic_read(&obj->event_since_en) < 15){
 		//Printhh("[%s] ii = %d...\n", __FUNCTION__, ii);	
@@ -3215,7 +3210,7 @@ static int stk8313_i2c_probe(struct i2c_client *client, const struct i2c_device_
 	atomic_set(&obj->trace, 0);
 	atomic_set(&obj->suspend, 0);
 
-#if 1   //fix Acc sensor not stable in Camera -> AR effect -> Tuturial..
+#if 1
 	Printhh("[%s] enable firlen(12) fir_en filter\n", __FUNCTION__);
 	atomic_set(&obj->firlen, 12);
 	//atomic_set(&obj->firlen, 16);
@@ -3223,8 +3218,6 @@ static int stk8313_i2c_probe(struct i2c_client *client, const struct i2c_device_
 	atomic_set(&obj->filter, 1);
 #endif
 
-	//CTS Single Sensor Tests : Fail
-	//G-sensor does not work (has side effect)
 	//atomic_set(&obj->event_since_en, 0);
 	stk8313_i2c_client = new_client;	
 

@@ -86,14 +86,78 @@ UINT_8 g_GetResultsBufferedCnt = 0;
 UINT_8 g_GetResultsCmdCnt = 0;
 
 /*******************************************************************************
-*                           P R I V A T E   D A T A
-********************************************************************************
-*/
-
-/*******************************************************************************
 *                                 M A C R O S
 ********************************************************************************
 */
+#define MAX_PACKET_DROP_LENGTH         24
+
+
+
+/*******************************************************************************
+*                           P R I V A T E   D A T A
+********************************************************************************
+*/
+typedef struct _PACKET_DROP_HEADER_T {
+	UINT_8		cmdVersion;  //== 0
+	UINT_8		cmdType;	  //== 0
+	UINT_8		magicCode;		 //==> Magic code 0x72
+	UINT_8		cmdBufferLen;	 //buffer length 
+	UINT_8		buffer[MAX_PACKET_DROP_LENGTH]; //64bit * 3
+		
+}__KAL_ATTRIB_PACKED__ PACKET_DROP_T, *P_PACKET_DROP_T;
+
+typedef struct _PACKET_DROP_SETTING_V1_T {
+   union{
+			/* bit endian issue */
+		struct {
+			UINT_64    all:1;
+			UINT_64    MDNS:1;
+			UINT_64    LLMNR:1;
+			UINT_64    BROWSER:1;
+			UINT_64    CAPWAP:1;
+			UINT_64    DNS:1;
+			UINT_64    NBNS:1;
+			UINT_64    SSDP:1;
+			UINT_64    others:1;
+			UINT_64    IGMP:1;
+			UINT_64    DHCP:1;
+			UINT_64    reserved:53;
+		} UDPbits;
+			
+		struct {
+			UINT_64    all:1;
+		} IGMPbits;
+		
+		/* byte endian issue */
+		UINT_64   bytes;
+	}Drop_IPv4;
+   
+	union{
+		/* bit endian issue */
+		struct {
+			UINT_64    all:1;
+			UINT_64    Multicast:1;
+			UINT_64    reserved:62;
+		} bits;
+		/* byte endian issue */
+		UINT_64   bytes;
+	}Drop_IPv6;
+	union{
+		/* bit endian issue */
+		struct {
+			UINT_64    all:1;
+			UINT_64    CDP:1;
+			UINT_64    STP:1;
+			UINT_64    XID:1;
+			UINT_64    others:1;
+			UINT_64    reserved:59;
+		} bits;
+		/* byte endian issue */
+		UINT_64   bytes;
+	}Drop_SNAP;
+	
+}__KAL_ATTRIB_PACKED__ PACKET_DROP_SETTING_V1_T, *P_PACKET_DROP_SETTING_V1_T;
+
 
 /*******************************************************************************
 *                   F U N C T I O N   D E C L A R A T I O N S
@@ -2237,6 +2301,169 @@ nla_put_failure:
 	return i4Status;
 }
 
+int mtk_cfg80211_testmode_drop_packet_enable(
+	IN struct wiphy *wiphy,
+    IN void *data,
+    IN int len,
+    IN P_GLUE_INFO_T prGlueInfo)
+{
+	INT_32 i4Status = WLAN_STATUS_SUCCESS;
+	WLAN_STATUS rStatus;
+	UINT_32 u4BufLen = 0;
+	P_CMD_HEADER_T pcmdV1Header = NULL;
+	P_CMD_FORMAT_V1_T prtCmdForMatBuf = NULL;
+
+	ASSERT(wiphy);
+	ASSERT(prGlueInfo);
+
+	pcmdV1Header = (P_CMD_HEADER_T) kalMemAlloc(sizeof(CMD_HEADER_T), VIR_MEM_TYPE);
+	if (pcmdV1Header == NULL) {
+		ASSERT(0);
+		return WLAN_STATUS_FAILURE;
+	}
+	kalMemSet(pcmdV1Header->buffer, 0, MAX_CMD_BUFFER_LENGTH);
+	prtCmdForMatBuf = (P_CMD_FORMAT_V1_T)pcmdV1Header->buffer;
+	pcmdV1Header->cmdType = CMD_TYPE_SET;
+	pcmdV1Header->cmdVersion = CMD_VER_1;
+	pcmdV1Header->itemNum = 1;
+	pcmdV1Header->cmdBufferLen = (pcmdV1Header->itemNum) * CMD_FORMAT_V1_LENGTH;
+	pcmdV1Header->cmdType = CMD_TYPE_SET;
+
+	prtCmdForMatBuf->itemStringLength = kalStrLen("DropPacketsEnable");
+	strncpy(prtCmdForMatBuf->itemString, "DropPacketsEnable", prtCmdForMatBuf->itemStringLength);
+	prtCmdForMatBuf->itemValueLength = 1;
+	prtCmdForMatBuf->itemValue[0] = 1;
+	prtCmdForMatBuf->itemType = ITEM_TYPE_DEC;
+	rStatus = kalIoctl(prGlueInfo,
+					wlanoidSetDropPacketsFilterEnable,
+					pcmdV1Header,
+					sizeof(CMD_HEADER_T),
+					FALSE,
+					FALSE,
+					TRUE,
+					FALSE,
+					&u4BufLen);
+
+	DBGLOG(OID,TRACE, "rStatus = %08x\n",rStatus);
+	
+	if (rStatus != WLAN_STATUS_SUCCESS)
+		i4Status = -EFAULT;
+	 
+	kalMemFree(pcmdV1Header, VIR_MEM_TYPE, sizeof(CMD_HEADER_T));
+	return i4Status;
+
+}
+
+int
+mtk_cfg80211_testmode_set_packet_filter(
+    IN struct wiphy *wiphy,
+    IN void *data,
+    IN int len,
+    IN P_GLUE_INFO_T prGlueInfo)
+{
+
+	WLAN_STATUS rStatus = WLAN_STATUS_SUCCESS;
+	INT_32 i4Status = WLAN_STATUS_SUCCESS;
+	UINT_32 u4BufLen = 0;
+	P_NL80211_DRIVER_RXFILTER_PARAMS prParams;
+		
+	PACKET_DROP_T cmdBuf;
+	P_PACKET_DROP_T pCmdHeader = NULL;
+	P_PACKET_DROP_SETTING_V1_T pCmdData = NULL;
+	UINT_64 u64Filter = 0;
+
+	ASSERT(wiphy);
+	ASSERT(prGlueInfo);
+
+	if (data && len)
+		prParams = (P_NL80211_DRIVER_RXFILTER_PARAMS)data;
+	else {
+		DBGLOG(OID,WARN,"data or len is invaild\n");
+		return -EINVAL;
+	}
+
+	kalMemZero(&cmdBuf, sizeof(cmdBuf));
+	
+	pCmdHeader = &cmdBuf;
+	pCmdHeader->cmdVersion = 0;
+	pCmdHeader->cmdType = 0;
+	pCmdHeader->magicCode = 0x72;
+	pCmdHeader->cmdBufferLen = MAX_PACKET_DROP_LENGTH;
+
+	pCmdData = (P_PACKET_DROP_SETTING_V1_T)&(pCmdHeader->buffer[0]);
+
+	u64Filter = prParams->Ipv4FilterHigh;
+	u64Filter = u64Filter<<32;
+	u64Filter &= 0xffffffff00000000;
+	pCmdData->Drop_IPv4.bytes = u64Filter|prParams->Ipv4FilterLow;
+	
+	
+	/*bit0~bit8
+
+	pCmdData->Drop_IPv4.bytes |= 0xFE;
+	struct {
+				UINT_64    all:1;
+				UINT_64    MDNS:1;
+				UINT_64    LLMNR:1;
+				UINT_64    BROWSER:1;
+				UINT_64    CAPWAP:1;
+				UINT_64    DNS:1;
+				UINT_64    NBNS:1;
+				UINT_64    SSDP:1;
+				UINT_64    others:1;
+			} UDPbits;
+	*/
+
+	u64Filter = prParams->Ipv6FilterHigh;
+	u64Filter = u64Filter<<32;
+	u64Filter &= 0xffffffff00000000;
+	pCmdData->Drop_IPv6.bytes = u64Filter|prParams->Ipv6FilterLow;
+	
+	/* bit0 only
+	pCmdData->Drop_IPv6.bytes |= 0x01;
+	struct { 
+				UINT_64    all:1;
+			} bits;
+
+	*/
+
+	u64Filter = prParams->SnapFilterHigh;
+	u64Filter = u64Filter<<32;
+	u64Filter &= 0xffffffff00000000;
+	pCmdData->Drop_SNAP.bytes = u64Filter|prParams->SnapFilterLow;
+	
+	/*bit0~bit4
+	pCmdData->Drop_SNAP.bytes |= 0x0E;
+	 struct {
+	       	UINT_64    all:1;
+			UINT_64    CDP:1;
+			UINT_64    STP:1;
+			UINT_64    XID:1;
+			UINT_64    others:1;
+        } bits;
+	*/ 
+	DBGLOG(OID, INFO, "mtk_cfg80211_testmode_set_packet_filter\nDrop_IPv4(%02llx)\nDrop_IPv6(%02llx)\nDrop_SNAP(%02llx)\n",\
+		pCmdData->Drop_IPv4.bytes,pCmdData->Drop_IPv6.bytes,pCmdData->Drop_SNAP.bytes);
+
+	rStatus = kalIoctl(prGlueInfo,
+					wlanoidSetPacketFilterPriv,
+					&cmdBuf,
+					sizeof(PACKET_DROP_T),
+					FALSE,
+					FALSE,
+					TRUE,
+					FALSE,
+					&u4BufLen);
+
+	DBGLOG(OID,TRACE, "rStatus = %08x\n",rStatus);
+	
+	if (rStatus != WLAN_STATUS_SUCCESS)
+		i4Status = -EFAULT;
+	 
+	return i4Status;	
+}
+
+
 int
 mtk_cfg80211_testmode_get_link_detection(IN struct wiphy *wiphy, IN void *data, IN int len, IN P_GLUE_INFO_T prGlueInfo)
 {
@@ -2493,6 +2720,11 @@ int mtk_cfg80211_testmode_cmd(IN struct wiphy *wiphy, IN struct wireless_dev *wd
 				}
 				break;
 			}
+		case TESTMODE_CMD_ID_RXFILTER:
+			//For old FW, it need enable DropPakcetsFilter at first
+			mtk_cfg80211_testmode_drop_packet_enable(wiphy, NULL, 0, prGlueInfo);
+			i4Status = mtk_cfg80211_testmode_set_packet_filter(wiphy, data, len, prGlueInfo);
+			break;		
 		case TESTMODE_CMD_ID_STATISTICS:
 			i4Status = mtk_cfg80211_testmode_get_sta_statistics(wiphy, data, len, prGlueInfo);
 			break;

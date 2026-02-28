@@ -20,12 +20,9 @@
 #include <linux/wakelock.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
-//CEI comments start
-
 #include <mt-plat/mt_gpio.h>
 #include <mt-plat/mt_gpio_core.h>
 #include <mach/gpio_const.h>
-//CEI comments end
 /* #include <mach/mt_pwm.h> */
 /* #include <mach/mt_pwm_hal.h> */
 /* #include <mach/mt_gpio.h> */
@@ -44,11 +41,8 @@
 #include <linux/gpio.h>
 #include <asm-generic/gpio.h>
 #endif
-//CEI comments start
-
 extern int board_type_with_hw_id(void);
 unsigned int g_hwid = 0;
-//CEI comments end
 /****************************************************************************
  * variables
  ***************************************************************************/
@@ -67,8 +61,6 @@ static unsigned int last_level1 = 102;
 static struct i2c_client *g_client;
 static int I2C_SET_FOR_BACKLIGHT  = 350;
 #endif
-//CEI comments start
-
 #ifdef CONFIG_HAS_EARLYSUSPEND
 extern struct workqueue_struct *suspend_work_queue;
 struct deferred_blink_change {
@@ -76,7 +68,6 @@ struct deferred_blink_change {
 	struct led_classdev *led_cdev;
 };
 #endif
-//CEI comments end
 /****************************************************************************
  * DEBUG MACROS
  ***************************************************************************/
@@ -117,23 +108,14 @@ static unsigned int limit = 255;
 static unsigned int limit_flag;
 static unsigned int last_level;
 static unsigned int current_level;
-//CEI comments start
-
 static int led_control_state = 0;
-//CEI comments end
 static DEFINE_MUTEX(bl_level_limit_mutex);
-//CEI comments start
-
-//CEI comments start
-
 //DEFINE_MUTEX(led_control_mutex);
 //int get_led_control_state(void)
 //{
 //    printk("%s: led_control_state=%d\n", __func__, led_control_state);
 //    return led_control_state;
 //}
-//CEI comments end
-//CEI comments end
 /****************************************************************************
  * external functions for display
  * this API add for control the power and temperature,
@@ -284,27 +266,15 @@ static void mt65xx_led_set(struct led_classdev *led_cdev,
         }
         mutex_unlock(&bl_level_limit_mutex);
 #endif
-    //CEI comments start
-    
     } else {        
-        //CEI comments start
-        
         //mutex_lock(&led_control_mutex);
-        //CEI comments end
-        //CEI comments start
-        
         if (led_control_state == 0 || mt_get_gpio_out(108) == 0) {
-        //CEI comments end
             printk("%s: led driver get control\n", __func__);
             mt_set_gpio_out(108, 1);
             led_control_state = 1;
         }
-        //CEI comments start
-        
         //mutex_unlock(&led_control_mutex);
-        //CEI comments end
     }
-    //CEI comments end
 #ifdef CONFIG_BACKLIGHT_SUPPORT_LP8557
     retval = gpio_request(I2C_SET_FOR_BACKLIGHT, "i2c_set_for_backlight");
     if (retval)
@@ -342,25 +312,13 @@ static void mt65xx_led_set(struct led_classdev *led_cdev,
 static int mt65xx_blink_set(struct led_classdev *led_cdev,
 			    unsigned long *delay_on, unsigned long *delay_off)
 {
-    //CEI comments start
-    
-    //CEI comments start
-    
     //mutex_lock(&led_control_mutex);
-    //CEI comments end
-    //CEI comments start
-    
     if (led_control_state == 0 || mt_get_gpio_out(108) == 0) {
-    //CEI comments end
         printk("%s: led driver get control\n", __func__);
         mt_set_gpio_out(108, 1);
         led_control_state = 1;
     }
-    //CEI comments start
-    
     //mutex_unlock(&led_control_mutex);
-    //CEI comments end
-    //CEI comments end
     if (mt_mt65xx_blink_set(led_cdev, delay_on, delay_off))
         return -1;
     else
@@ -484,8 +442,6 @@ int backlight_brightness_set(int level)
 
 }
 EXPORT_SYMBOL(backlight_brightness_set);
-//CEI comments start
-
 static ssize_t show_hwid(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	LEDS_DRV_DEBUG("get hwid value is:%d\n", g_hwid);
@@ -493,7 +449,6 @@ static ssize_t show_hwid(struct device *dev, struct device_attribute *attr, char
 }
 static DEVICE_ATTR(hwid, 0444, show_hwid, NULL);
 
-//CEI comments end
 #if 0
 static ssize_t show_duty(struct device *dev, struct device_attribute *attr,
 			 char *buf)
@@ -706,8 +661,6 @@ static int led_i2c_remove(struct i2c_client *client)
 }
 #endif
 
-//CEI comments start
-
 static ssize_t led_delay_on_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -849,8 +802,6 @@ static ssize_t led_blink_store(struct device *dev, struct device_attribute *attr
         led_data->delay_off = 0;
     }
     if (!(led_cdev->flags & LED_SUSPENDED)) {
-        //CEI comments start
-        
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	if (queue_blink_change(led_cdev) != 0) {
 #endif
@@ -862,13 +813,11 @@ static ssize_t led_blink_store(struct device *dev, struct device_attribute *attr
 #ifdef CONFIG_HAS_EARLYSUSPEND
         }
 #endif
-        //CEI comments end
     }
     
     return size;
 }
 static DEVICE_ATTR(blink, 0644, led_blink_show, led_blink_store);
-//CEI comments end
 /****************************************************************************
  * driver functions
  ***************************************************************************/
@@ -945,8 +894,6 @@ static int mt65xx_leds_probe(struct platform_device *pdev)
 			bl_setting = &g_leds_data[i]->cust;
 		}
 		#endif
-        //CEI comments start
-	    
         if (strcmp(g_leds_data[i]->cdev.name,"red") == 0) {
 	            ret = device_create_file(g_leds_data[i]->cdev.dev, &dev_attr_blink);
 		    if (ret) {
@@ -963,12 +910,9 @@ static int mt65xx_leds_probe(struct platform_device *pdev)
 		    ret = device_create_file(g_leds_data[i]->cdev.dev, &dev_attr_blink_brightness);
 	            if (ret)
 		        goto err;
-            //CEI comments start
-            
 			ret = device_create_file(g_leds_data[i]->cdev.dev, &dev_attr_hwid);
 	            if (ret)
 		        goto err;
-            //CEI comments end
 		}
         if (strcmp(g_leds_data[i]->cdev.name,"green") == 0) {
             ret = device_create_file(g_leds_data[i]->cdev.dev, &dev_attr_blink);
@@ -1004,7 +948,6 @@ static int mt65xx_leds_probe(struct platform_device *pdev)
             if (ret)
 		        goto err;
         }
-        //CEI comments end
 		if (ret)
 			goto err;
 
@@ -1146,10 +1089,7 @@ static int __init mt65xx_leds_init(void)
 /* platform_device_unregister(&mt65xx_leds_device); */
 		return ret;
 	}
-    //CEI comments start
-	
 	g_hwid = board_type_with_hw_id();
-    //CEI comments end
 	mt_leds_wake_lock_init();
 
 	return ret;
