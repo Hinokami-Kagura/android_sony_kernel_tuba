@@ -506,6 +506,7 @@ static int ccmni_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	ccmni_fwd_filter_t flt_tmp;
 	ccmni_flt_act_t flt_act;
 	unsigned int i;
+	unsigned int cmp_len;
 
 	switch (cmd) {
 	case SIOCSTXQSTATE:
@@ -626,7 +627,7 @@ static int ccmni_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		}
 
 		if (flt_act.action == CCMNI_FLT_ADD) { /* add new filter */
-			if (ccmni->flt_cnt > CCMNI_FLT_NUM) {
+			if (ccmni->flt_cnt >= CCMNI_FLT_NUM) {
 				CCMNI_INF_MSG(ccmni->md_id, "SIOCFWDFILTER[ADD]: %s flt table full\n", dev->name);
 				return -ENOMEM;
 			}
@@ -640,10 +641,15 @@ static int ccmni_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				dev->name, i, flt_tmp.ver, flt_tmp.s_pref, flt_tmp.d_pref,
 				flt_tmp.ipv4.saddr, flt_tmp.ipv4.daddr, ccmni->flt_cnt);
 		} else if (flt_act.action == CCMNI_FLT_DEL) {
+			if (flt_tmp.ver == IPV4_VERSION) {
+				cmp_len = offsetof(struct ccmni_fwd_filter, ipv4.daddr) + 4;
+			} else {
+				cmp_len = sizeof(struct ccmni_fwd_filter);
+			}
 			for (i = 0; i < CCMNI_FLT_NUM; i++) {
 				if (ccmni->flt_tbl[i].ver == 0)
 					continue;
-				if (!memcmp(&ccmni->flt_tbl[i], &flt_tmp, sizeof(struct ccmni_fwd_filter))) {
+				if (!memcmp(&ccmni->flt_tbl[i], &flt_tmp, cmp_len)) {
 					CCMNI_INF_MSG(ccmni->md_id,
 						"SIOCFWDFILTER[DEL]: %s del flt%d(%x, %x, %x, %x, %x)(%d)\n",
 						dev->name, i, flt_tmp.ver, flt_tmp.s_pref, flt_tmp.d_pref,

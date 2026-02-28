@@ -366,17 +366,24 @@ static int runtime_reg_dump(unsigned long start_addr, unsigned int size, unsigne
 	return buf_idx;
 }
 
-static int command_parser(const char *input_str, char cmd[], unsigned long out_put[])
+static int command_parser(const char *input_str, size_t count, char cmd[], unsigned long out_put[])
 {
 	int i = 0, j, k;
 	char tmp_buf[32];
 	char filter_str[256];
 	int temp_valu;
+	size_t string_count = count;
+	unsigned int para_label = 1;
+
+	if (string_count > 256) {
+		CCCI_UTIL_ERR_MSG("error: input String length = %u>256\n", (unsigned int)string_count);
+		return -1;
+	}
 
 	/* Filter out 0xD and 0xA */
 	j = 0;
 	i = 0;
-	while ((i < 256) && (input_str[i] != '\0')) {
+	while ((i < 255) && (input_str[i] != '\0') && (string_count--)) {
 		if ((input_str[i] == 0xD) || (input_str[i] == 0xA)) {
 			i++;
 			continue;
@@ -387,6 +394,11 @@ static int command_parser(const char *input_str, char cmd[], unsigned long out_p
 	}
 	filter_str[j] = '\0';
 
+	if (string_count >= 2) {
+		CCCI_UTIL_ERR_MSG("error: In-valid input String\n");
+		return -1;
+	}
+
 	i = 0;
 	/* Parse command */
 	if (filter_str[i] == '\0')
@@ -394,9 +406,19 @@ static int command_parser(const char *input_str, char cmd[], unsigned long out_p
 	j = 0;
 	while (filter_str[i] != '\0') {
 		if (filter_str[i] != '_') {
-			cmd[j] = filter_str[i];
-			j++;
-			i++;
+			if ((filter_str[i] < 'A') || ((filter_str[i] > 'Z')
+				&& (filter_str[i] < 'a')) || (filter_str[i] > 'z')) {
+				CCCI_UTIL_ERR_MSG("error: In-valid command\n");
+				return -1;
+			}
+			if (j < 31) {
+				cmd[j] = filter_str[i];
+				j++;
+				i++;
+			} else {
+				CCCI_UTIL_ERR_MSG("error: cmd[] is out-of-bounds\n");
+				return -1;
+			}
 		} else {
 			i++;
 			break;
@@ -409,11 +431,37 @@ static int command_parser(const char *input_str, char cmd[], unsigned long out_p
 		if (filter_str[i] == '\0')
 			return k + 1;
 		j = 0;
+		para_label = 1;
 		while (filter_str[i] != '\0') {
 			if (filter_str[i] != '_') {
-				tmp_buf[j] = filter_str[i];
-				j++;
-				i++;
+				if (para_label) {
+					if ((filter_str[i] == '0') && ((filter_str[i+1] == 'x')
+						|| (filter_str[i+1] == 'X'))) {
+						tmp_buf[j] = filter_str[i];
+						tmp_buf[j+1] = filter_str[i+1];
+						i = i + 2;
+						j = j + 2;
+						para_label = 0;
+						continue;
+					} else {
+						CCCI_UTIL_ERR_MSG("error: In-valid parameter header\n");
+						return -1;
+					}
+				}
+				if ((filter_str[i] < '0') || ((filter_str[i] > '9')
+					&& (filter_str[i] < 'A')) || ((filter_str[i] > 'F')
+					&& (filter_str[i] < 'a')) || (filter_str[i] > 'f')) {
+					CCCI_UTIL_ERR_MSG("error: In-valid parameter\n");
+					return -1;
+				}
+				if (j < 31) {
+					tmp_buf[j] = filter_str[i];
+					j++;
+					i++;
+				} else {
+					CCCI_UTIL_ERR_MSG("error: parameter[] is out-of-bounds\n");
+					return -1;
+				}
 			} else {
 				i++;
 				break;
@@ -552,9 +600,10 @@ static ssize_t aat_show(char *buf)
 
 static ssize_t aat_store(const char *buf, size_t count)
 {
-	int para_num = command_parser(buf, aat_cmd, aat_para);
+	int para_num = command_parser(buf, count, aat_cmd, aat_para);
 
-	cmd_process(aat_cmd, aat_para, para_num);
+	if (para_num > 0)
+		cmd_process(aat_cmd, aat_para, para_num);
 	return count;
 }
 

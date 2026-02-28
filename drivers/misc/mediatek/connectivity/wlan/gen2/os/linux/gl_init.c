@@ -2748,6 +2748,12 @@ static VOID wlanRemove(VOID)
 			GLUE_RELEASE_THE_SPIN_LOCK(&g_p2p_lock);
 		}
 	}
+	if (prGlueInfo->prAdapter->fgIsP2PRegistered) {
+		DBGLOG(INIT, INFO, "p2pNetUnregister...\n");
+#if !CFG_SUPPORT_PERSIST_NETDEV
+		p2pNetUnregister(prGlueInfo, FALSE);
+#endif
+	}
 #endif
 
 #if CFG_ENABLE_BT_OVER_WIFI
@@ -2828,10 +2834,6 @@ static VOID wlanRemove(VOID)
 #if CFG_ENABLE_WIFI_DIRECT
 	prGlueInfo->prAdapter->fgIsWlanLaunched = FALSE;
 	if (prGlueInfo->prAdapter->fgIsP2PRegistered) {
-		DBGLOG(INIT, TRACE, "p2pNetUnregister...\n");
-#if !CFG_SUPPORT_PERSIST_NETDEV
-		p2pNetUnregister(prGlueInfo, FALSE);
-#endif
 		DBGLOG(INIT, INFO, "p2pRemove...\n");
 		p2pRemove(prGlueInfo);
 	}

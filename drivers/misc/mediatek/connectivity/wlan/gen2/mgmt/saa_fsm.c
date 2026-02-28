@@ -981,8 +981,11 @@ static VOID saaAutoReConnect(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRe
 {
 	OS_SYSTIME rCurrentTime;
 	P_CONNECTION_SETTINGS_T prConnSettings;
+	P_AIS_FSM_INFO_T prAisFsmInfo;
+	ENUM_AA_STATE_T eNextState;
 
 	prConnSettings = &(prAdapter->rWifiVar.rConnSettings);
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
 	GET_CURRENT_SYSTIME(&rCurrentTime);
 
 	/*
@@ -991,7 +994,19 @@ static VOID saaAutoReConnect(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRe
 		Need to do partial scan for the AP channel.
 	*/
 
-	if (!CHECK_FOR_TIMEOUT(rCurrentTime, prAisBssInfo->rConnTime,
+	if ((eFrmType == FRM_DEAUTH) && (prAisFsmInfo->eCurrentState == AIS_STATE_JOIN) &&
+		(prAisBssInfo->eConnectionStateIndicated == PARAM_MEDIA_STATE_DISCONNECTED)) {
+		/*
+		*if we dont have connected to ap,but receive deauth,
+		*this cause AIS enter idle,
+		*and deauth event will notbe indicated to upper layer,
+		*supplicant will auth timeout 10s later,
+		*so let SAA assoc-timeout this time, will trigger reconnect in 7s
+		*/
+		prStaRec->u2StatusCode = STATUS_CODE_ASSOC_TIMEOUT;
+		eNextState = AA_STATE_IDLE;
+		saaFsmSteps(prAdapter, prStaRec, eNextState, NULL);
+	} else if (!CHECK_FOR_TIMEOUT(rCurrentTime, prAisBssInfo->rConnTime,
 				  SEC_TO_SYSTIME(AIS_AUTORN_MIN_INTERVAL)) &&
 		/* maybe some packets are queued in HW, we will get many de-auth */
 		(prAisBssInfo->fgDisConnReassoc == FALSE)) {

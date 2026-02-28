@@ -541,7 +541,7 @@ new_skb_retry:
 			if (!new_skb){
 				CCCI_ERROR_LOG(md->index, TAG, "alloc skb fail on q%d\n", queue->index);
 				show_free_areas(0); //MTK adds debug memory log--taylor
-				msleep(500);
+				msleep(100);
 
 				if (retry_count <= 20) {
 					CCCI_ERROR_LOG(md->index, TAG, "alloc skb fail retry %d times\n", retry_count);
