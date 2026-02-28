@@ -71,7 +71,7 @@ static kal_uint32 BTCVSD_read_wait_queue_flag;
 static kal_uint32 writeToBT_cnt;
 static kal_uint32 readFromBT_cnt;
 
-
+static bool rx_timeout;
 
 /*=============================================================================================
 /     BT SCO Internal Function
@@ -211,6 +211,8 @@ int AudDrv_btcvsd_Allocate_Buffer(kal_uint8 isRX)
 
 	if (isRX == 1) {
 		readFromBT_cnt = 0;
+		rx_timeout = false;
+
 		BT_CVSD_Mem.u4RXBufferSize = sizeof(BT_SCO_RX_T);
 
 		if ((BT_CVSD_Mem.pucRXVirtBufAddr == NULL)
@@ -466,6 +468,7 @@ ssize_t AudDrv_btcvsd_read(char __user *data, size_t count)
 	unsigned long u4DataRemained;
 	unsigned long flags;
 	kal_uint64 read_timeout_limit;
+	int max_timeout_trial = 2;
 
 	if ((btsco.pRX == NULL) || (btsco.pRX->PacketBuf == NULL) || (btsco.pRX->u4BufferSize == 0)) {
 		pr_debug("AudDrv_btcvsd_read btsco.pRX == NULL || btsco.pRX->PacketBuf == NULL || btsco.pRX->u4BufferSize == 0!!!\n");
@@ -596,11 +599,47 @@ ssize_t AudDrv_btcvsd_read(char __user *data, size_t count)
 						read_timeout_limit / 1000000 / 10);
 			t2 = sched_clock();
 			LOGBT("AudDrv_btcvsd_read WAKEUP...count=%zu\n", count);
+
 			t2 = t2 - t1; /* in ns (10^9) */
+			LOGBT("%s(), WAKEUP...wait event interrupt, ret = %d, BTCVSD_read_wait_queue_flag = %d\n",
+			      __func__,
+			      ret,
+			      BTCVSD_read_wait_queue_flag);
+
 			if (t2 > read_timeout_limit) {
-				pr_debug("%s timeout, (%llu)ns, read_timeout_limit(%llu)\n",
-					__func__, t2, read_timeout_limit);
+				pr_warn("%s timeout, %llu ns, timeout_limit %llu, ret %zd, flag %d\n",
+					__func__,
+					t2, read_timeout_limit,
+					ret,
+					BTCVSD_read_wait_queue_flag);
+			}
+
+			if (ret < 0) {
+				/* error, -ERESTARTSYS if it was interrupted by a signal */
+				pr_err("%s(), error, trial left %d, read_count %zd\n",
+				       __func__,
+				       max_timeout_trial,
+				       read_count);
+
+				rx_timeout = true;
 				return read_count;
+			} else if (ret == 0) {
+				/* conidtion is false after timeout */
+				max_timeout_trial--;
+				pr_err("%s(), error, timeout, condition is false, trial left %d, read_count %zd\n",
+				       __func__,
+				       max_timeout_trial,
+				       read_count);
+
+				if (max_timeout_trial <= 0) {
+					rx_timeout = true;
+					return read_count;
+				}
+			} else if (ret == 1) {
+				/* condition is true after timeout */
+				pr_debug("%s(), timeout, condition is true\n", __func__);
+			} else {
+				pr_debug("%s(), condition is true before timeout\n", __func__);
 			}
 		}
 	}
@@ -765,19 +804,18 @@ ssize_t AudDrv_btcvsd_write(const char __user *data, size_t count)
 
 			if (ret < 0) {
 				/* error, -ERESTARTSYS if it was interrupted by a signal */
-				max_timeout_trial--;
-				pr_err("%s(), error, trial left %d\n",
+				pr_err("%s(), error, trial left %d, ret = %d\n",
 				       __func__,
-				       max_timeout_trial);
+				       max_timeout_trial,
+				       ret);
 
-				if (max_timeout_trial <= 0)
-					return written_size;
+				return written_size;
 			} else if (ret == 0) {
 				/* conidtion is false after timeout */
 				max_timeout_trial--;
-				pr_err("%s(), error, timeout, condition is false, trial left %d\n",
-				       __func__,
-				       max_timeout_trial);
+				pr_warn("%s(), warn, timeout, condition is false, trial left %d\n",
+					__func__,
+					max_timeout_trial);
 
 				if (max_timeout_trial <= 0)
 					return written_size;
@@ -822,4 +860,18 @@ void Set_BTCVSD_State(unsigned long arg)
 	}
 }
 
+bool btcvsd_rx_irq_received(void)
+{
+	return readFromBT_cnt;
+}
+
+bool btcvsd_rx_timeout(void)
+{
+	return rx_timeout;
+}
+
+void btcvsd_rx_reset_timeout(void)
+{
+	rx_timeout = false;
+}
 

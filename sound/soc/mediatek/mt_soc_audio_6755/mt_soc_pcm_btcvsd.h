@@ -237,6 +237,9 @@ void Disable_CVSD_Wakeup(void);
 void Enable_CVSD_Wakeup(void);
 void Set_BTCVSD_State(unsigned long arg);
 
+bool btcvsd_rx_irq_received(void);
+bool btcvsd_rx_timeout(void);
+void btcvsd_rx_reset_timeout(void);
 
 /* here is temp address for ioremap BT hardware register */
 extern volatile void *BTSYS_PKV_BASE_ADDRESS;

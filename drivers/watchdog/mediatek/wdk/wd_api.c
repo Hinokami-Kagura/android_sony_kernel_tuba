@@ -601,6 +601,7 @@ void arch_reset(char mode, const char *cmd)
 		reboot = 1;
 		write_magic(S1_WARMBOOT_MAGIC_VAL | (S1_WARMBOOT_S1 << 16), 0);
 	} else if(cmd && !strcmp(cmd, "oemF")) {
+		wd_dram_reserved_mode(false);
 		reboot = 1;
 		write_magic(S1_WARMBOOT_MAGIC_VAL | (S1_WARMBOOT_FOTA << 16), 0);
 	} else if(cmd && !strcmp(cmd, "oem-50")) {

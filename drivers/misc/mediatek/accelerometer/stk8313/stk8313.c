@@ -95,7 +95,6 @@
 
 
 //
-//henry: copy from sensortek
 //
 #define STK831X_DRIVER_VERSION	"0.9.5"
 
@@ -105,7 +104,7 @@
 #define STK_PERMISSION_THREAD
 #define CONFIG_STK831X_LOWPASS
 //#define STK_ZG_FILTER
-//#define STK_TUNE  //henry mark
+//#define STK_TUNE
 #define STK_DEBUG_CALI
 
 
@@ -247,7 +246,7 @@ struct stk8313_i2c_data {
     /*early suspend*/
 #if defined(CONFIG_HAS_EARLYSUSPEND)
     struct early_suspend    early_drv;
-#endif
+#endif     
     //atomic_t				event_since_en;
 	atomic_t				recv_reg; // for access i2c
 };
@@ -320,7 +319,6 @@ static struct i2c_driver stk8313_i2c_driver = {
 	.remove    	= stk8313_i2c_remove,
 //	.detect		= stk8313_i2c_detect,
 #if !defined(CONFIG_HAS_EARLYSUSPEND)
-//henry: enter here!
     .suspend            = stk8313_suspend,
     .resume             = stk8313_resume,
 #endif
@@ -646,7 +644,6 @@ static int STK8313_ReadData(struct i2c_client *client, s16 data[STK8313_AXES_NUM
 		         (buf[STK8313_AXIS_Y*2+1]));
 		data[STK8313_AXIS_Z] = (s16)((buf[STK8313_AXIS_Z*2] << 8) |
 		         (buf[STK8313_AXIS_Z*2+1]));
-// henry: this is raw data	    
 		//Printhh("[%s] x=%#x  y=%#x  z=%#x \n", __FUNCTION__, data[STK8313_AXIS_X], data[STK8313_AXIS_Y], data[STK8313_AXIS_Z]);
 
 		if(atomic_read(&priv->trace) & ADX_TRC_REGXYZ)
@@ -1073,7 +1070,6 @@ static int STK8313_SetReset(struct i2c_client *client)
 }
 
 
-//henry add
 #if 1
 int stk831x_hwmsen_read_block(struct i2c_client *client, u8 addr, u8 *data, u8 len)
 {
@@ -1097,7 +1093,7 @@ int stk831x_hwmsen_read_block(struct i2c_client *client, u8 addr, u8 *data, u8 l
 	};
 	int err;
 
-#if 0	//henry add for 400KHz
+#if 0
 	.timing = 400
 #endif
 	if (!client)
@@ -1228,7 +1224,7 @@ static int STK831X_SetPowerModeToWrite(struct i2c_client *client, bool enable)
 	u8 databuf[2];    
 	int res = 0;
 	//u8 addr = STK831X_REG_MODE;
-	//struct stk831x_i2c_data *obj = i2c_get_clientdata(client);    //henry modify
+	//struct stk831x_i2c_data *obj = i2c_get_clientdata(client);
     	struct stk8313_i2c_data *obj = i2c_get_clientdata(client);
 
 	//int k_status = atomic_read(&cali_status); //androidM
@@ -1265,7 +1261,7 @@ static int STK831X_SetPowerModeToWrite(struct i2c_client *client, bool enable)
 	if(enable)
 	{
 		STK831X_SetVD(client);
-		//atomic_set(&obj->event_since_en, 0);  //henry mark
+		//atomic_set(&obj->event_since_en, 0);
 #ifdef STK_TUNE		
 		if((k_status&0xF0) != 0 && stk_tune_done == 0)
 		{
@@ -1537,7 +1533,6 @@ static int STK8313_SetPowerMode_locked(struct i2c_client *client, bool enable)
     
     Printhh("[%s] enable = %d call STK831X_SetVD()..\n", __FUNCTION__, enable);
 
-//henry add
 	if(enable)
 	{
 		STK831X_SetVD(client);
@@ -2034,7 +2029,6 @@ static int STK8313_Init(struct i2c_client *client, int reset_cali)
 	if(res != STK8313_SUCCESS)
 	{
 	    GSE_LOG("fwq stk8313 check id error\n");
-            //henry tt: g-sensor not work
             #if 1
             if(g_iAddSkipCheckId ==1)
             {
@@ -2784,7 +2778,6 @@ static ssize_t store_trace_value(struct device_driver *ddri, const char *buf, si
 	}	
 	else
 	{
-//henry tt
 		//GSE_ERR("invalid content: '%s', length = %d\n", buf, count);
 	}
 	
@@ -2804,7 +2797,6 @@ static ssize_t show_status_value(struct device_driver *ddri, char *buf)
 		return 0;
 	}	
 	
-	//henry: monitor g-sensor invalid data issue.
 	hwmsen_read_byte_sr(obj->client, STK8313_REG_MODE, databuf);
 	
 	if(obj->hw)
@@ -2812,7 +2804,6 @@ static ssize_t show_status_value(struct device_driver *ddri, char *buf)
 		len += snprintf(buf+len, PAGE_SIZE-len, "CUST: %d %d (%d %d)\n", 
 	            obj->hw->i2c_num, obj->hw->direction, obj->hw->power_id, obj->hw->power_vol);   
 
-		//henry: monitor g-sensor invalid data issue.
 		len += scnprintf(buf+len, PAGE_SIZE-len, "power status= %d, power reg= 0x%x\n", sensor_power,databuf[0]);
 	}
 	else
@@ -3145,7 +3136,7 @@ int gsensor_operate(void* self, uint32_t command, void* buff_in, int size_in,
 	switch (command)
 	{
 		case SENSOR_DELAY:
-#if 1 //henry add
+#if 1
 			#ifdef STK831X_HOLD_ODR
 			Printhh("[%s] HOLD ODR = %d\n", __FUNCTION__, STK831X_INIT_ODR);
 			break;
@@ -3329,7 +3320,6 @@ static long stk8313_unlocked_ioctl(struct file *file, unsigned int cmd,
 
 		case GSENSOR_IOCTL_READ_SENSORDATA:
 			//Printhh("[%s] GSENSOR_IOCTL_READ_SENSORDATA..\n", __FUNCTION__);
-			//henry: T2 will call this
 
 			//GSE_LOG("fwq GSENSOR_IOCTL_READ_SENSORDATA\n");
 			data = (void __user *) arg;
@@ -3489,7 +3479,6 @@ static long stk8313_unlocked_ioctl(struct file *file, unsigned int cmd,
 	return err;
 }
 
-//henry add
 #ifdef CONFIG_COMPAT
 static long stk831x_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -3521,7 +3510,7 @@ static long stk831x_compat_ioctl(struct file *file, unsigned int cmd, unsigned l
 				GSE_ERR("GSENSOR_IOCTL_READ_SENSORDATA unlocked_ioctl failed!\n");
 			}
 			break;
-#if 1   //henry add for set cali
+#if 1
 		case COMPAT_GSENSOR_IOCTL_SET_CALI:
 			Printhh("[%s] COMPAT_GSENSOR_IOCTL_SET_CALI \n", __FUNCTION__);
 			
@@ -3559,7 +3548,6 @@ static struct file_operations stk8313_fops = {
 	.release = stk8313_release,
 	.unlocked_ioctl = stk8313_unlocked_ioctl,
 
-//henry add
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = stk831x_compat_ioctl,
 #endif	
@@ -3572,7 +3560,6 @@ static struct miscdevice stk8313_device = {
 };
 /*----------------------------------------------------------------------------*/
 #ifndef CONFIG_HAS_EARLYSUSPEND
-//henry: enter here!
 /*----------------------------------------------------------------------------*/
 static int stk8313_suspend(struct i2c_client *client, pm_message_t msg) 
 {
@@ -3639,7 +3626,6 @@ static int stk8313_resume(struct i2c_client *client)
 }
 /*----------------------------------------------------------------------------*/
 #else /*CONFIG_HAS_EARLY_SUSPEND is defined*/
-//henry: not enter here!
 /*----------------------------------------------------------------------------*/
 static void stk8313_early_suspend(struct early_suspend *h) 
 {
@@ -3794,7 +3780,7 @@ static int gsensor_set_delay(u64 ns)
 	//err = MPU6515_SetBWRate(obj_i2c_data->client, sample_delay);
 	//mutex_unlock(&gsensor_mutex);
 
-#if 0   //henry tt
+#if 0
 	if (value >= 50) {
 		atomic_set(&obj_i2c_data->filter, 0);
 	} else {
@@ -3825,6 +3811,7 @@ static int gsensor_get_data(int *x, int *y, int *z, int *status)
 
 
 	//Printhh("[%s] enter..11\n", __FUNCTION__);
+
 #if 0
 	//ii = atomic_read(&obj->event_since_en);
 	if(atomic_read(&obj->event_since_en) < 15){
@@ -3959,14 +3946,13 @@ static int stk8313_i2c_probe(struct i2c_client *client, const struct i2c_device_
 	{
 		GSE_ERR("invalid direction: %d\n", obj->hw->direction);
 		//goto exit;
-		//henry fixed: Coverity CID:89787
 		goto exit_kfree;
 	}
 
 	obj_i2c_data = obj;
 	obj->client = client;
 	new_client = obj->client;
-#if 1	//henry add for 400KHz
+#if 1
 	new_client->timing = 400;
 #endif
 	i2c_set_clientdata(new_client,obj);
@@ -3981,6 +3967,7 @@ static int stk8313_i2c_probe(struct i2c_client *client, const struct i2c_device_
 	atomic_set(&obj->fir_en, 1);
 	atomic_set(&obj->filter, 1);
 #endif
+
 	//atomic_set(&obj->event_since_en, 0);
 	stk8313_i2c_client = new_client;	
 
@@ -4080,7 +4067,6 @@ static int stk8313_i2c_probe(struct i2c_client *client, const struct i2c_device_
 
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-//henry: not enter here.
 	obj->early_drv.level    = EARLY_SUSPEND_LEVEL_DISABLE_FB - 1,
 	obj->early_drv.suspend  = stk8313_early_suspend,
 	obj->early_drv.resume   = stk8313_late_resume,    
@@ -4250,7 +4236,6 @@ static int __init stk8313_init(void)
 	Printhh("[%s] hw->power_vol = %#x\n", __FUNCTION__, hw->power_vol);
         Printhh("[%s] hw->direction = %d\n", __FUNCTION__, hw->direction);
 
-        //henry:set i2c 400K at Mt6755.dtsi, it's useless
         Printhh("[%s] i2c speend is 400K\n", __FUNCTION__);
 
 	GSE_FUN();

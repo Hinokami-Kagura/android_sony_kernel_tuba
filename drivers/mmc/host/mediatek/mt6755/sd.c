@@ -4481,6 +4481,10 @@ int msdc_execute_tuning(struct mmc_host *mmc, u32 opcode)
 
 	msdc_init_tune_path(host, mmc->ios.timing);
 
+	#if !defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	pmic_force_vcore_pwm(true);
+	#endif
+
 	msdc_ungate_clock(host);
 
 	if (host->hw->host_function == MSDC_SD) {
@@ -4594,6 +4598,10 @@ int msdc_execute_tuning(struct mmc_host *mmc, u32 opcode)
 	host->legacy_tuning_in_progress = false;
 	host->legacy_tuning_done = true;
 	host->first_tune_done = 1;
+
+	#if !defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	pmic_force_vcore_pwm(false);
+	#endif
 
 	msdc_gate_clock(host, 1);
 

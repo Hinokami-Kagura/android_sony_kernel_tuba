@@ -92,7 +92,7 @@ static struct snd_pcm_hardware mtk_btcvsd_tx_hardware = {
 static int mtk_pcm_btcvsd_tx_stop(struct snd_pcm_substream *substream)
 {
 	pr_warn("%s\n", __func__);
-
+	Set_BTCVSD_State(BT_SCO_TXSTATE_ENDING);
 	return 0;
 }
 
@@ -203,7 +203,6 @@ static int mtk_pcm_btcvsd_tx_close(struct snd_pcm_substream *substream)
 
 	pr_warn("%s\n", __func__);
 
-	Set_BTCVSD_State(BT_SCO_TXSTATE_ENDING);
 	Set_BTCVSD_State(BT_SCO_TXSTATE_IDLE);
 	ret = AudDrv_btcvsd_Free_Buffer(0);
 

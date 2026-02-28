@@ -21,6 +21,8 @@
 #include <linux/completion.h>
 #include <linux/scatterlist.h>
 
+#define HS400_ONE_CYCLE                 (50)
+#define HS400_ACTUAL_CYCLE              (50 - 10 * 2)
 #define MSDC_FIFO_THD_1K                (1024)
 #define TUNE_TX_CNT                     (100)
 /*#define TUNE_DATA_TX_ADDR               (0x358000)*/
@@ -410,9 +412,13 @@ static int autok_send_tune_cmd(struct msdc_host *host, unsigned int opcode, enum
 
 	/* clear fifo */
 	if ((tune_type_value == TUNE_CMD) || (tune_type_value == TUNE_DATA)) {
-		autok_msdc_reset();
-		msdc_clear_fifo();
-		MSDC_WRITE32(MSDC_INT, 0xffffffff);
+		if ((tune_type_value == TUNE_CMD) && (host->id == 0))
+			MSDC_WRITE32(MSDC_INT, MSDC_INT_CMDTMO | MSDC_INT_CMDRDY | MSDC_INT_RSPCRCERR);
+		else {
+			autok_msdc_reset();
+			msdc_clear_fifo();
+			MSDC_WRITE32(MSDC_INT, 0xffffffff);
+		}
 	}
 
 	/* start command */
@@ -1183,7 +1189,7 @@ static int autok_pad_dly_sel(struct AUTOK_REF_INFO *pInfo)
 		pInfo->opt_dly_cnt = uDlySel_F;
 
 	}
-	AUTOK_RAWPRINT("[AUTOK]Analysis Result: 1T = %d\r\n ", cycle_cnt);
+	AUTOK_RAWPRINT("[AUTOK]Analysis Result: 1T = %d\r\n", cycle_cnt);
 	return ret;
 }
 
@@ -1295,7 +1301,7 @@ autok_pad_dly_sel_single_edge(struct AUTOK_SCAN_RES *pInfo, unsigned int cycle_c
 	return ret;
 }
 
-static int autok_ds_dly_sel(struct AUTOK_SCAN_RES *pInfo, unsigned int cycle_value, unsigned int *pDlySel)
+static int autok_ds_dly_sel(struct AUTOK_SCAN_RES *pInfo, unsigned int cycle_value, unsigned int *pDlySel, u8 *param)
 {
 	unsigned int ret = 0;
 	int uDlySel = 0;
@@ -1321,8 +1327,17 @@ static int autok_ds_dly_sel(struct AUTOK_SCAN_RES *pInfo, unsigned int cycle_val
 			}
 		} else {
 			/* uDlySel = pInfo->bd_info[0].Bound_Start / 2; */
-			uDlySel = (((pInfo->bd_info[0].Bound_Start * 5000) / cycle_value)
-				- (1250 - 400)) * cycle_value / 5000;
+			/* uDlySel = (((pInfo->bd_info[0].Bound_Start * 5000) / cycle_value)
+				- (1250 - 400)) * cycle_value / 5000; */
+			if ((cycle_value * HS400_ACTUAL_CYCLE) / (4 * HS400_ONE_CYCLE)
+				> pInfo->bd_info[0].Bound_Start) {
+				param[DAT_RD_D_DLY1] = (cycle_value * HS400_ACTUAL_CYCLE) / (4 * HS400_ONE_CYCLE)
+					- pInfo->bd_info[0].Bound_Start;
+				param[DAT_RD_D_DLY1_SEL] = 1;
+				uDlySel = 0;
+			} else
+				uDlySel = pInfo->bd_info[0].Bound_Start
+				- (cycle_value * HS400_ACTUAL_CYCLE) / (4 * HS400_ONE_CYCLE);
 		}
 	} else {
 		/* bound count == 0 */
@@ -2033,9 +2048,30 @@ int execute_online_tuning_hs400(struct msdc_host *host, u8 *res)
 	opcode = MMC_READ_SINGLE_BLOCK;
 #endif
 	autok_tuning_parameter_init(host, p_autok_tune_res);
+	/* tune data pad delay , find data pad boundary */
+	for (j = 0; j < 32; j++) {
+		msdc_autok_adjust_paddly(host, &j, DAT_PAD_RDLY);
+		for (k = 0; k < AUTOK_CMD_TIMES / 4; k++) {
+			ret = autok_send_tune_cmd(host, opcode, TUNE_DATA);
+			if ((ret & (E_RESULT_CMD_TMO | E_RESULT_RSP_CRC)) != 0) {
+				AUTOK_RAWPRINT
+				    ("[AUTOK]Error Autok CMD Failed while tune DATA PAD Delay\r\n");
+				return -1;
+			} else if ((ret & (E_RESULT_DAT_CRC | E_RESULT_DAT_TMO)) != 0)
+				break;
+		}
+		if ((ret & (E_RESULT_DAT_CRC | E_RESULT_DAT_TMO)) != 0) {
+			p_autok_tune_res[DAT_RD_D_DLY1] = j;
+			if (j)
+				p_autok_tune_res[DAT_RD_D_DLY1_SEL] = 1;
+			break;
+		}
+	}
+	autok_tuning_parameter_init(host, p_autok_tune_res);
 	memset(&uCmdDatInfo, 0, sizeof(struct AUTOK_REF_INFO));
 	pBdInfo = (struct AUTOK_SCAN_RES *)&(uCmdDatInfo.scan_info[0]);
 	RawData64 = 0LL;
+	/* tune DS delay , base on data pad boundary */
 	for (j = 0; j < 32; j++) {
 		msdc_autok_adjust_paddly(host, &j, DS_PAD_RDLY);
 		for (k = 0; k < AUTOK_CMD_TIMES / 4; k++) {
@@ -2052,7 +2088,7 @@ int execute_online_tuning_hs400(struct msdc_host *host, u8 *res)
 	}
 	RawData64 |= 0xffffffff00000000;
 	score = autok_simple_score64(tune_result_str64, RawData64);
-	AUTOK_DBGPRINT(AUTOK_DBG_RES, "[AUTOK]DLY1/2 %d \t %d \t %s\r\n", uCmdEdge, score,
+	AUTOK_DBGPRINT(AUTOK_DBG_RES, "[AUTOK] DLY1/2 %d \t %d \t %s\r\n", uCmdEdge, score,
 		       tune_result_str64);
 	if (autok_check_scan_res64(RawData64, pBdInfo) != 0)
 		return -1;
@@ -2070,7 +2106,7 @@ int execute_online_tuning_hs400(struct msdc_host *host, u8 *res)
 	}
 	#endif
 
-	if (autok_ds_dly_sel(pBdInfo, cycle_value, &uDatDly) == 0) {
+	if (autok_ds_dly_sel(pBdInfo, cycle_value, &uDatDly, p_autok_tune_res) == 0) {
 		autok_paddly_update(DS_PAD_RDLY, uDatDly, p_autok_tune_res);
 	} else {
 		AUTOK_DBGPRINT(AUTOK_DBG_RES,
@@ -2117,7 +2153,7 @@ int execute_online_tuning_hs400(struct msdc_host *host, u8 *res)
 			       pBdInfo->bd_info[i].Bound_width, pBdInfo->bd_info[i].is_fullbound);
 	}
 
-	if (autok_ds_dly_sel(pBdInfo, cycle_value, &uDatDly) == 0) {
+	if (autok_ds_dly_sel(pBdInfo, cycle_value, &uDatDly, p_autok_tune_res) == 0) {
 		autok_param_update(EMMC50_DS_ZDLY_DLY, uDatDly, p_autok_tune_res);
 		AUTOK_DBGPRINT(AUTOK_DBG_RES,
 			       "[AUTOK]================Analysis Result[HS400]================\r\n");
@@ -3497,9 +3533,9 @@ int hs400_execute_tuning_cmd(struct msdc_host *host, u8 *res)
 	if (execute_cmd_online_tuning(host, res) != 0)
 		AUTOK_RAWPRINT("[AUTOK only for cmd] ========Error: Autok HS400 Failed========");
 
-	autok_msdc_reset();
-	msdc_clear_fifo();
-	MSDC_WRITE32(MSDC_INT, 0xffffffff);
+	/*autok_msdc_reset();*/
+	/*msdc_clear_fifo();*/
+	/*MSDC_WRITE32(MSDC_INT, 0xffffffff);*/
 	MSDC_WRITE32(MSDC_INTEN, int_en);
 	MSDC_SET_FIELD(MSDC_CFG, MSDC_CFG_CKPDN, clk_pwdn);
 
@@ -3567,9 +3603,9 @@ int hs200_execute_tuning_cmd(struct msdc_host *host, u8 *res)
 	if (execute_cmd_online_tuning(host, res) != 0)
 		AUTOK_RAWPRINT("[AUTOK only for cmd] ========Error: Autok HS200 Failed========");
 
-	autok_msdc_reset();
-	msdc_clear_fifo();
-	MSDC_WRITE32(MSDC_INT, 0xffffffff);
+	/*autok_msdc_reset();*/
+	/*msdc_clear_fifo();*/
+	/*MSDC_WRITE32(MSDC_INT, 0xffffffff);*/
 	MSDC_WRITE32(MSDC_INTEN, int_en);
 	MSDC_SET_FIELD(MSDC_CFG, MSDC_CFG_CKPDN, clk_pwdn);
 

@@ -193,6 +193,7 @@ static struct snd_pcm_hardware mtk_btcvsd_rx_hardware = {
 static int mtk_pcm_btcvsd_rx_stop(struct snd_pcm_substream *substream)
 {
 	pr_warn("%s\n", __func__);
+	Set_BTCVSD_State(BT_SCO_RXSTATE_ENDING);
 	return 0;
 }
 
@@ -296,7 +297,6 @@ static int mtk_pcm_btcvsd_rx_close(struct snd_pcm_substream *substream)
 
 	pr_warn("%s\n", __func__);
 
-	Set_BTCVSD_State(BT_SCO_RXSTATE_ENDING);
 	Set_BTCVSD_State(BT_SCO_RXSTATE_IDLE);
 	ret = AudDrv_btcvsd_Free_Buffer(1);
 
@@ -418,9 +418,80 @@ static struct snd_pcm_ops mtk_btcvsd_rx_ops = {
 	.silence =  mtk_pcm_btcvsd_rx_silence,
 };
 
+/* btsco band info */
+static const char * const irq_received_str[] = {"No", "Yes"};
+static const char * const rx_timeout_str[] = {"No", "Yes"};
+
+static const struct soc_enum btcvsd_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(irq_received_str), irq_received_str),
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(rx_timeout_str), rx_timeout_str),
+};
+
+static int btcvsd_rx_irq_received_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s(), rx irq received %d\n",
+		 __func__, btcvsd_rx_irq_received());
+	ucontrol->value.integer.value[0] = btcvsd_rx_irq_received();
+	return 0;
+}
+
+static int btcvsd_rx_irq_received_set(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s()\n", __func__);
+	if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(irq_received_str)) {
+		pr_err("return -EINVAL\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int btcvsd_rx_timeout_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s(), btcvsd rx timeout %d\n",
+		 __func__, btcvsd_rx_timeout() ? 1 : 0);
+	ucontrol->value.integer.value[0] = btcvsd_rx_timeout() ? 1 : 0;
+	btcvsd_rx_reset_timeout();
+	return 0;
+}
+
+static int btcvsd_rx_timeout_set(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s()\n", __func__);
+	if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(rx_timeout_str)) {
+		pr_err("return -EINVAL\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const struct snd_kcontrol_new btcvsd_controls[] = {
+	SOC_ENUM_EXT("btcvsd_rx_irq_received",
+		     btcvsd_enum[0],
+		     btcvsd_rx_irq_received_get,
+		     btcvsd_rx_irq_received_set),
+	SOC_ENUM_EXT("btcvsd_rx_timeout",
+		     btcvsd_enum[1],
+		     btcvsd_rx_timeout_get,
+		     btcvsd_rx_timeout_set),
+};
+
+static int mtk_asoc_pcm_btcvsd_rx_probe(struct snd_soc_platform *platform)
+{
+	snd_soc_add_platform_controls(platform, btcvsd_controls,
+				      ARRAY_SIZE(btcvsd_controls));
+	return 0;
+}
+
 static struct snd_soc_platform_driver mtk_btcvsd_rx_soc_platform = {
 	.ops        = &mtk_btcvsd_rx_ops,
 	.pcm_new    = mtk_asoc_pcm_btcvsd_rx_new,
+	.probe = mtk_asoc_pcm_btcvsd_rx_probe,
 };
 
 static int mtk_btcvsd_rx_probe(struct platform_device *pdev)

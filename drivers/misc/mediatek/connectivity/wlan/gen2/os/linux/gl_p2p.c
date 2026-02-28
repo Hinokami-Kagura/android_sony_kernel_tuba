@@ -707,6 +707,7 @@ static const struct ieee80211_iface_combination mtk_p2p_iface_combos[] = {
 		.limits = mtk_p2p_iface_limits
 	}
 };
+
 #endif
 
 #if 0
@@ -1206,8 +1207,10 @@ BOOLEAN glP2pCreateWirelessDevice(P_GLUE_INFO_T prGlueInfo)
 
 	prWiphy->interface_modes = BIT(NL80211_IFTYPE_AP) | BIT(NL80211_IFTYPE_P2P_CLIENT) |
 						BIT(NL80211_IFTYPE_P2P_GO) | BIT(NL80211_IFTYPE_STATION);
+
 	prWiphy->iface_combinations = mtk_p2p_iface_combos;
 	prWiphy->n_iface_combinations = ARRAY_SIZE(mtk_p2p_iface_combos);
+
 
 	prWiphy->bands[IEEE80211_BAND_2GHZ] = &mtk_band_2ghz;
 	prWiphy->bands[IEEE80211_BAND_5GHZ] = &mtk_band_5ghz;
