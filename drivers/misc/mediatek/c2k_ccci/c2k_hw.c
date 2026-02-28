@@ -1,8 +1,20 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include "c2k_hw.h"
 
-/*#if defined(CONFIG_MTK_C2K_SUPPORT)*/
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 
@@ -405,7 +417,6 @@ int c2k_gpio_set_irq_type(int gpio, unsigned int type)
 		return -EINVAL;
 	}
 #else
-	gpio_set_debounce(gpio, 0);
 	irq_set_irq_type(irq, type);
 #endif
 	/*pr_debug("[C2K]set irq(%d) type(%d) done\n", irq, type); */
@@ -477,7 +488,9 @@ void c2k_reset_tx_gpio_ready(int gpio)
 	struct mtk_c2k_gpio_des *des;
 
 	des = gpio_des_find_by_gpio(gpio);
-	des->eint_ls = 1;
-	des->irq_type = IRQ_TYPE_EDGE_FALLING;
-	c2k_gpio_set_irq_type(gpio, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING);
+	if (des) {
+		des->eint_ls = 1;
+		des->irq_type = IRQ_TYPE_EDGE_FALLING;
+		c2k_gpio_set_irq_type(gpio, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING);
+	}
 }

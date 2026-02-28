@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -149,7 +162,7 @@ static imgsensor_info_struct imgsensor_info = {
 	.sensor_interface_type = SENSOR_INTERFACE_TYPE_MIPI,
 	.mipi_sensor_type = MIPI_OPHY_NCSI2, //0,MIPI_OPHY_NCSI2;  1,MIPI_OPHY_CSI2
 	.mipi_settle_delay_mode = MIPI_SETTLEDELAY_AUTO, //0,MIPI_SETTLEDELAY_AUTO; 1,MIPI_SETTLEDELAY_MANNUAL
-	.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_B,
+	.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_R,
 	.mclk = 24,
 	.mipi_lane_num = SENSOR_MIPI_4_LANE,
 	.i2c_addr_table = {0x34,0x20,0xff},
@@ -696,7 +709,6 @@ static void ihdr_write_shutter(kal_uint16 le, kal_uint16 se)
 }
 
 
-#if 0
 static void set_mirror_flip(kal_uint8 image_mirror)
 {
 
@@ -725,7 +737,7 @@ static void set_mirror_flip(kal_uint8 image_mirror)
 			     break;
 		}
 }
-#endif
+
 /*************************************************************************
 * FUNCTION
 *	night_mode
@@ -2013,6 +2025,8 @@ static kal_uint32 open(void)
 
 	/* initail sequence write in  */
 	sensor_init();
+
+	set_mirror_flip(IMAGE_NORMAL);
 
 	spin_lock(&imgsensor_drv_lock);
 

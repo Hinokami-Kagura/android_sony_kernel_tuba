@@ -266,10 +266,6 @@ struct SENSOR_DATA {
 #define ALSPS_GET_ALS_DATA				_IOR(ALSPS, 0x07, int)
 #define ALSPS_GET_ALS_RAW_DATA				_IOR(ALSPS, 0x08, int)
 
-#define ALSPS_IOCTL_SET_CALI_CCI                 _IOW(ALSPS, 0x17, int)  /*Colby add 20130111*/
-#define ALSPS_SET_THD                 _IOW(ALSPS, 0x18, int) /*add for FTM interrupt check 20130416*/
-#define ALSPS_GET_INTERRUPT_COUNT     _IOR(ALSPS, 0x19, int) /*add for FTM interrupt check 20130416*/
-//#define ALSPS_IOCTL_SET_CALI_CCI     _IOR(ALSPS, 0x20, int) 
 /*-------------------MTK add-------------------------------------------*/
 #define ALSPS_GET_PS_TEST_RESULT		_IOR(ALSPS, 0x09, int)
 #define ALSPS_GET_ALS_TEST_RESULT		_IOR(ALSPS, 0x0A, int)
@@ -285,6 +281,10 @@ struct SENSOR_DATA {
 #define AAL_SET_ALS_MODE			_IOW(ALSPS, 0x14, int)
 #define AAL_GET_ALS_MODE			_IOR(ALSPS, 0x15, int)
 #define AAL_GET_ALS_DATA			_IOR(ALSPS, 0x16, int)
+#define ALSPS_SET_THD				_IOR(ALSPS, 0x17, int)
+#define ALSPS_GET_INTERRUPT_COUNT	_IOR(ALSPS, 0x18, int)
+#define ALSPS_IOCTL_SET_CALI_CCI	_IOR(ALSPS, 0x19, int)
+			
 #ifdef CONFIG_COMPAT
 #define COMPAT_ALSPS_SET_PS_MODE				_IOW(ALSPS, 0x01, compat_int_t)
 #define COMPAT_ALSPS_GET_PS_MODE				_IOR(ALSPS, 0x02, compat_int_t)

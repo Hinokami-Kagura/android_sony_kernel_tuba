@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -12,7 +25,7 @@
 /*#include <mach/mt_typedefs.h>*/
 /*#include <mach/mt_spm_cpu.h>*/
 /*#include <mach/mt_spm_reg.h>*/
-#include <mt_spm_mtcmos.h>
+#include "mt_spm_mtcmos.h"
 #include <mach/mt_spm_mtcmos_internal.h>
 #include <mach/mt_clkmgr.h>
 

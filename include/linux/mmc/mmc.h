@@ -24,12 +24,6 @@
 #ifndef LINUX_MMC_MMC_H
 #define LINUX_MMC_MMC_H
 
-#define MMC_CMDQ_TH_IDLE		(0)
-#define MMC_CMDQ_TH_CMD45		(1)
-#define MMC_CMDQ_TH_CMD46		(2)
-#define MMC_CMDQ_TH_CMD13		(3)
-#define MMC_CMDQ_TH_DAT			(4)
-
 /* Standard MMC commands (4.1)           type  argument     response */
    /* class 1 */
 #define MMC_GO_IDLE_STATE         0   /* bc                          */
@@ -426,7 +420,7 @@ struct _mmc_csd {
 #define EXT_CSD_POWER_ON		1
 #define EXT_CSD_POWER_OFF_SHORT		2
 #define EXT_CSD_POWER_OFF_LONG		3
-#define EXT_CSD_SLEEP_NOTIFICATION      4
+#define EXT_CSD_SLEEP_NOTIFICATION	4	/* eMMC reversion after v5.0 */
 
 #define EXT_CSD_PWR_CL_8BIT_MASK	0xF0	/* 8 bit PWR CLS */
 #define EXT_CSD_PWR_CL_4BIT_MASK	0x0F	/* 8 bit PWR CLS */

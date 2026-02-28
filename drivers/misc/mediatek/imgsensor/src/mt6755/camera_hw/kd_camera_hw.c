@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/videodev2.h>
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
@@ -26,6 +39,7 @@
 #define PK_DBG_FUNC(fmt, arg...)    pr_debug(PFX fmt, ##arg)
 
 #define DEBUG_CAMERA_HW_K
+#define CONTROL_AF_POWER 1
 #ifdef DEBUG_CAMERA_HW_K
 #define PK_DBG PK_DBG_FUNC
 #define PK_ERR(fmt, arg...)         pr_err(fmt, ##arg)
@@ -102,13 +116,17 @@ u32 pinSet[3][8] = {
 
 PowerCust PowerCustList = {
 	{
-		//{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_Low},	/* for AVDD; */
-		{GPIO_CAMERA_LDO_EN_PIN,GPIO_MODE_GPIO,Vol_High},   //for AVDD;
+		{GPIO_CAMERA_LDO_EN_PIN, GPIO_MODE_GPIO, Vol_High},	/* for AVDD; */
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_Low},	/* for DVDD; */
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_Low},	/* for DOVDD; */
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_Low},	/* for AFVDD; */
+#ifdef CONFIG_MTK_PMIC_CHIP_MT6353
+		{GPIO_SUPPORTED, GPIO_MODE_GPIO, Vol_High},	/* for SUB_DVDD; */
+#else
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_Low},	/* for SUB_DVDD; */
-		{GPIO_CAMERA_LDO_EN2_PIN,GPIO_MODE_GPIO,Vol_High},   //for SUB_AVDD;
+#endif
+//		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_Low},	/* MAIN2_DVDD; */
+		{GPIO_CAMERA_LDO_EN2_PIN, GPIO_MODE_GPIO, Vol_High},	/* SUB_AVDD; */
 		/*{GPIO_SUPPORTED, GPIO_MODE_GPIO, Vol_Low}, */
 	 }
 };
@@ -117,55 +135,53 @@ PowerCust PowerCustList = {
 
 PowerUp PowerOnList = {
 	{
-	  {SENSOR_DRVNAME_IMX258_MIPI_RAW,
-	  	{
-	   		{SensorMCLK, Vol_High, 0},
-	   		{RST, Vol_Low, 0},
-	   		{DOVDD, Vol_1800, 0},
-	   		{AVDD, Vol_2800, 0},
-	   		{DVDD, Vol_1200, 0},
-	   		{AFVDD, Vol_2800, 1},
-	   		{RST, Vol_High, 0}
-	   	},
+	 {SENSOR_DRVNAME_IMX258_MIPI_RAW,
+	  {
+	   {SensorMCLK, Vol_High, 0},
+	   {RST, Vol_Low, 0},
+	   {DOVDD, Vol_1800, 0},
+	   {AVDD, Vol_2800, 0},
+	   {DVDD, Vol_1200, 0},
+	   {AFVDD, Vol_2800, 1},
+	   {RST, Vol_High, 0}
+	   },
 	  },
-
-	  {SENSOR_DRVNAME_IMX258_LGIT_MIPI_RAW,
-	  	{
-	   		{SensorMCLK, Vol_High, 0},
-	   		{RST, Vol_Low, 0},
-	   		{DOVDD, Vol_1800, 0},
-	   		{AVDD, Vol_2800, 0},
-	   		{DVDD, Vol_1200, 0},
-	   		{AFVDD, Vol_2800, 1},
-	   		{RST, Vol_High, 0}
-	   	},
+	 {SENSOR_DRVNAME_IMX258_LGIT_MIPI_RAW,
+	  {
+	   {SensorMCLK, Vol_High, 0},
+	   {RST, Vol_Low, 0},
+	   {DOVDD, Vol_1800, 0},
+	   {AVDD, Vol_2800, 0},
+	   {DVDD, Vol_1200, 0},
+	   {AFVDD, Vol_2800, 1},
+	   {RST, Vol_High, 0}
+	   },
 	  },
-
-	  {SENSOR_DRVNAME_IMX219_MIPI_RAW,
-    		{
-      			{AVDD,  Vol_2800, 0},
-		  	{DOVDD, Vol_1800, 0},
-      			{DVDD,  Vol_1200, 0},
-      			{SensorMCLK,Vol_High, 5},
-        		{AFVDD, Vol_2800, 1},
-        		{RST,   Vol_Low,  10},
-        		{RST,   Vol_High, 1}
-      		},
-		},
-	  {SENSOR_DRVNAME_IMX219_TRULY_MIPI_RAW,
-            	{
-                	{AVDD,  Vol_2800, 0},
-		        {DOVDD, Vol_1800, 0},
-                	{DVDD,  Vol_1200, 0},
-                	{SensorMCLK,Vol_High, 5},
-                	{AFVDD, Vol_2800, 1},
-                	{RST,   Vol_Low,  10},
-                	{RST,   Vol_High, 1}
-            	},
-       	  },
-		/* add new sensor before this line */
-		{NULL,},
-	}
+	 {SENSOR_DRVNAME_IMX219_MIPI_RAW,
+	  {
+	   {AVDD, Vol_2800, 0},
+	   {DOVDD, Vol_1800, 0},
+	   {DVDD, Vol_1200, 0},
+	   {SensorMCLK, Vol_High, 5},
+	   {AFVDD, Vol_2800, 1},
+	   {RST, Vol_Low, 10},
+	   {RST, Vol_High, 1}
+	   },
+	  },
+	 {SENSOR_DRVNAME_IMX219_TRULY_MIPI_RAW,
+	  {
+	   {AVDD, Vol_2800, 0},
+	   {DOVDD, Vol_1800, 0},
+	   {DVDD, Vol_1200, 0},
+	   {SensorMCLK, Vol_High, 5},
+	   {AFVDD, Vol_2800, 1},
+	   {RST, Vol_Low, 10},
+	   {RST, Vol_High, 1}
+	   },
+	  },
+	 /* add new sensor before this line */
+	 {NULL,},
+	 }
 };
 
 
@@ -314,9 +330,9 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 	if (IS_ERR(cam_ldo_vcama_l)) {
 		ret = PTR_ERR(cam_ldo_vcama_l);
 		PK_DBG("%s : pinctrl err, cam_ldo_vcama_l\n", __func__);
-	} 
-	
-   	cam_ldo_sub_vcama_h = pinctrl_lookup_state(camctrl, "cam_ldo_sub_vcama_1");
+	}
+
+	cam_ldo_sub_vcama_h = pinctrl_lookup_state(camctrl, "cam_ldo_sub_vcama_1");
 	if (IS_ERR(cam_ldo_sub_vcama_h)) {
 		ret = PTR_ERR(cam_ldo_sub_vcama_h);
 		PK_DBG("%s : pinctrl err, cam_ldo_sub_vcama_h\n", __func__);
@@ -327,7 +343,7 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		ret = PTR_ERR(cam_ldo_sub_vcama_l);
 		PK_DBG("%s : pinctrl err, cam_ldo_sub_vcama_l\n", __func__);
 	}
-	
+
 	cam_ldo_vcamd_h = pinctrl_lookup_state(camctrl, "cam_ldo_vcamd_1");
 	if (IS_ERR(cam_ldo_vcamd_h)) {
 		ret = PTR_ERR(cam_ldo_vcamd_h);
@@ -427,92 +443,110 @@ int mtkcam_gpio_set(int PinIdx, int PwrType, int Val)
 	case RST:
 		if (PinIdx == 0) {
 			if (Val == 0 && !IS_ERR(cam0_rst_l))
-				pinctrl_select_state(camctrl, cam0_rst_l);
+				ret = pinctrl_select_state(camctrl, cam0_rst_l);
 			else if (Val == 1 && !IS_ERR(cam0_rst_h))
-				pinctrl_select_state(camctrl, cam0_rst_h);
+				ret = pinctrl_select_state(camctrl, cam0_rst_h);
 			else
+			{
+				ret = -1;
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, RST\n", __func__,PinIdx ,Val);
+			}
 		} else if (PinIdx == 1) {
 			if (Val == 0 && !IS_ERR(cam1_rst_l))
-				pinctrl_select_state(camctrl, cam1_rst_l);
+				ret = pinctrl_select_state(camctrl, cam1_rst_l);
 			else if (Val == 1 && !IS_ERR(cam1_rst_h))
-				pinctrl_select_state(camctrl, cam1_rst_h);
+				ret = pinctrl_select_state(camctrl, cam1_rst_h);
 			else
+			{
+				ret = -1;
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, RST\n", __func__,PinIdx ,Val);
+			}
 		} else {
 			if (Val == 0 && !IS_ERR(cam2_rst_l))
-				pinctrl_select_state(camctrl, cam2_rst_l);
+				ret = pinctrl_select_state(camctrl, cam2_rst_l);
 			else if (Val == 1 && !IS_ERR(cam2_rst_h))
-				pinctrl_select_state(camctrl, cam2_rst_h);
+				ret = pinctrl_select_state(camctrl, cam2_rst_h);
 			else
+			{
+				ret = -1;
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, RST\n", __func__,PinIdx ,Val);
+			}
 		}
 		break;
 	case PDN:
 		if (PinIdx == 0) {
 			if (Val == 0 && !IS_ERR(cam0_pnd_l))
-				pinctrl_select_state(camctrl, cam0_pnd_l);
+				ret = pinctrl_select_state(camctrl, cam0_pnd_l);
 			else if (Val == 1 && !IS_ERR(cam0_pnd_h))
-				pinctrl_select_state(camctrl, cam0_pnd_h);
+				ret = pinctrl_select_state(camctrl, cam0_pnd_h);
 			else
+			{
+				ret = -1;
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, PDN\n", __func__,PinIdx ,Val);
+			}
 		} else if (PinIdx == 1) {
 			if (Val == 0 && !IS_ERR(cam1_pnd_l))
-				pinctrl_select_state(camctrl, cam1_pnd_l);
+				ret = pinctrl_select_state(camctrl, cam1_pnd_l);
 			else if (Val == 1 && !IS_ERR(cam1_pnd_h))
-				pinctrl_select_state(camctrl, cam1_pnd_h);
+				ret = pinctrl_select_state(camctrl, cam1_pnd_h);
 			else
+			{
+				ret = -1;
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, PDN\n", __func__,PinIdx ,Val);
+			}
 		} else {
 			if (Val == 0 && !IS_ERR(cam2_pnd_l))
-				pinctrl_select_state(camctrl, cam2_pnd_l);
+				ret = pinctrl_select_state(camctrl, cam2_pnd_l);
 			else if (Val == 1 && !IS_ERR(cam2_pnd_h))
-				pinctrl_select_state(camctrl, cam2_pnd_h);
+				ret = pinctrl_select_state(camctrl, cam2_pnd_h);
 			else
+			{
+				ret = -1;
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, PDN\n", __func__,PinIdx ,Val);
+			}
 		}
 		break;
 	case AVDD:
 		if (Val == 0 && !IS_ERR(cam_ldo_vcama_l))
-			pinctrl_select_state(camctrl, cam_ldo_vcama_l);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcama_l);
 		else if (Val == 1 && !IS_ERR(cam0_rst_h))
-			pinctrl_select_state(camctrl, cam_ldo_vcama_h);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcama_h);
 		break;
 	case SUB_AVDD:
 		if (Val == 0 && !IS_ERR(cam_ldo_sub_vcama_l))
-			pinctrl_select_state(camctrl, cam_ldo_sub_vcama_l); 
+			ret = pinctrl_select_state(camctrl, cam_ldo_sub_vcama_l);
 		else if (Val == 1 && !IS_ERR(cam1_rst_h))
-			pinctrl_select_state(camctrl, cam_ldo_sub_vcama_h);
+			ret = pinctrl_select_state(camctrl, cam_ldo_sub_vcama_h);
 		break;
 	case DVDD:
 		if (Val == 0 && !IS_ERR(cam_ldo_vcamd_l))
-			pinctrl_select_state(camctrl, cam_ldo_vcamd_l);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcamd_l);
 		else if (Val == 1 && !IS_ERR(cam_ldo_vcamd_h))
-			pinctrl_select_state(camctrl, cam_ldo_vcamd_h);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcamd_h);
 		break;
 	case DOVDD:
 		if (Val == 0 && !IS_ERR(cam_ldo_vcamio_l))
-			pinctrl_select_state(camctrl, cam_ldo_vcamio_l);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcamio_l);
 		else if (Val == 1 && !IS_ERR(cam_ldo_vcamio_h))
-			pinctrl_select_state(camctrl, cam_ldo_vcamio_h);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcamio_h);
 		break;
 	case AFVDD:
 		if (Val == 0 && !IS_ERR(cam_ldo_vcamaf_l))
-			pinctrl_select_state(camctrl, cam_ldo_vcamaf_l);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcamaf_l);
 		else if (Val == 1 && !IS_ERR(cam_ldo_vcamaf_h))
-			pinctrl_select_state(camctrl, cam_ldo_vcamaf_h);
+			ret = pinctrl_select_state(camctrl, cam_ldo_vcamaf_h);
 		break;
 	case SUB_DVDD:
 		if (Val == 0 && !IS_ERR(cam_ldo_sub_vcamd_l))
-			pinctrl_select_state(camctrl, cam_ldo_sub_vcamd_l);
+			ret = pinctrl_select_state(camctrl, cam_ldo_sub_vcamd_l);
 		else if (Val == 1 && !IS_ERR(cam_ldo_sub_vcamd_h))
-			pinctrl_select_state(camctrl, cam_ldo_sub_vcamd_h);
+			ret = pinctrl_select_state(camctrl, cam_ldo_sub_vcamd_h);
 		break;
 	case MAIN2_DVDD:
 		if (Val == 0 && !IS_ERR(cam_ldo_main2_vcamd_l))
-			pinctrl_select_state(camctrl, cam_ldo_main2_vcamd_l);
+			ret = pinctrl_select_state(camctrl, cam_ldo_main2_vcamd_l);
 		else if (Val == 1 && !IS_ERR(cam_ldo_main2_vcamd_h))
-			pinctrl_select_state(camctrl, cam_ldo_main2_vcamd_h);
+			ret = pinctrl_select_state(camctrl, cam_ldo_main2_vcamd_h);
 		break;
 	default:
 		PK_DBG("PwrType(%d) is invalid !!\n", PwrType);
@@ -534,9 +568,9 @@ BOOL hwpoweron(PowerInformation pwInfo, char *mode_name)
 					return FALSE;
 				}
 			} else {
-				if (mtkcam_gpio_set(pinSetIdx, CUST_AVDD, PowerCustList.PowerCustInfo[CUST_SUB_AVDD].Voltage)) {
+				if (mtkcam_gpio_set(pinSetIdx, SUB_AVDD, PowerCustList.PowerCustInfo[CUST_SUB_AVDD].Voltage)) {
 					PK_ERR("[CAMERA CUST_SUB_AVDD] set gpio failed!!\n");
-				} else { pinctrl_select_state(camctrl, cam_ldo_sub_vcama_h); }
+				}
 			}
 		} else {
 			if (PowerCustList.PowerCustInfo[CUST_AVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
@@ -545,9 +579,9 @@ BOOL hwpoweron(PowerInformation pwInfo, char *mode_name)
 					return FALSE;
 				}
 			} else {
-				if (mtkcam_gpio_set(pinSetIdx, CUST_AVDD, PowerCustList.PowerCustInfo[CUST_AVDD].Voltage)) {
+				if (mtkcam_gpio_set(pinSetIdx, pwInfo.PowerType, PowerCustList.PowerCustInfo[CUST_AVDD].Voltage)) {
 					PK_ERR("[CAMERA CUST_AVDD] set gpio failed!!\n");
-				} else { pinctrl_select_state(camctrl, cam_ldo_vcama_h); }
+				}
 			}
 		}
 	} else if (pwInfo.PowerType == DVDD) {
@@ -563,7 +597,7 @@ BOOL hwpoweron(PowerInformation pwInfo, char *mode_name)
 					return FALSE;
 				}
 			} else {
-				if (mtkcam_gpio_set(pinSetIdx, pwInfo.PowerType, PowerCustList.PowerCustInfo[CUST_MAIN2_DVDD].Voltage)) {
+				if (mtkcam_gpio_set(pinSetIdx, MAIN2_DVDD, PowerCustList.PowerCustInfo[CUST_MAIN2_DVDD].Voltage)) {
 					PK_ERR("[CAMERA CUST_MAIN2_DVDD] set gpio failed!!\n");
 				}
 			}
@@ -579,7 +613,7 @@ BOOL hwpoweron(PowerInformation pwInfo, char *mode_name)
 					return FALSE;
 				}
 			} else {
-				if (mtkcam_gpio_set(pinSetIdx, pwInfo.PowerType, PowerCustList.PowerCustInfo[CUST_SUB_DVDD].Voltage)) {
+				if (mtkcam_gpio_set(pinSetIdx, SUB_DVDD, PowerCustList.PowerCustInfo[CUST_SUB_DVDD].Voltage)) {
 					PK_ERR("[CAMERA CUST_SUB_DVDD] set gpio failed!!\n");
 				}
 			}
@@ -609,45 +643,15 @@ BOOL hwpoweron(PowerInformation pwInfo, char *mode_name)
 
 		}
 	} else if (pwInfo.PowerType == AFVDD) {
-#if 1
-		PK_DBG("[CAMERA SENSOR] Skip AFVDD setting\n");
-		if (PowerCustList.PowerCustInfo[3].Gpio_Pin == GPIO_UNSUPPORTED) {
+#if CONTROL_AF_POWER
+		if (PowerCustList.PowerCustInfo[CUST_AFVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
 			if (TRUE != _hwPowerOn(pwInfo.PowerType, pwInfo.Voltage)) {
-				PK_DBG("[CAMERA SENSOR] Fail to enable digital power\n");
+				PK_ERR("[CAMERA SENSOR] Fail to enable af power\n");
 				return FALSE;
 			}
-		} /*else {
-			if (mt_set_gpio_mode
-			    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-			     PowerCustList.PowerCustInfo[3].Gpio_Mode)) {
-				PK_DBG("[CAMERA SENSOR] set gpio mode failed!!\n");
-			}
-			if (mt_set_gpio_dir(PowerCustList.PowerCustInfo[3].Gpio_Pin, GPIO_DIR_OUT)) {
-				PK_DBG("[CAMERA SENSOR] set gpio dir failed!!\n");
-			}
-			if (mt_set_gpio_out
-			    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-			     PowerCustList.PowerCustInfo[3].Voltage)) {
-				PK_DBG("[CAMERA SENSOR] set gpio failed!!\n");
-			}*/
-#endif
-#if 0
-			if (PowerCustList.PowerCustInfo[4].Gpio_Pin != GPIO_UNSUPPORTED) {
-				mdelay(5);
-				if (mt_set_gpio_mode
-				    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-				     PowerCustList.PowerCustInfo[3].Gpio_Mode)) {
-					PK_DBG("[CAMERA SENSOR] set gpio mode failed!!\n");
-				}
-				if (mt_set_gpio_dir
-				    (PowerCustList.PowerCustInfo[3].Gpio_Pin, GPIO_DIR_OUT)) {
-					PK_DBG("[CAMERA SENSOR] set gpio dir failed!!\n");
-				}
-				if (mt_set_gpio_out
-				    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-				     PowerCustList.PowerCustInfo[3].Voltage)) {
-					PK_DBG("[CAMERA SENSOR] set gpio failed!!\n");
-				}
+		} else {
+			if (mtkcam_gpio_set(pinSetIdx, pwInfo.PowerType, PowerCustList.PowerCustInfo[CUST_AFVDD].Voltage)) {
+					PK_ERR("[CAMERA CUST_AFVDD] set gpio failed!!\n");
 			}
 		}
 #endif
@@ -702,107 +706,83 @@ BOOL hwpowerdown(PowerInformation pwInfo, char *mode_name)
 		if (pinSetIdx == 1) {
 			if (PowerCustList.PowerCustInfo[CUST_SUB_AVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
 				if (TRUE != _hwPowerDown(pwInfo.PowerType)) {
-					PK_ERR("[CAMERA SENSOR] Fail to  disable analog power\n");
+					PK_ERR("[CAMERA SENSOR] Fail to disable analog power\n");
 					return FALSE;
 				}
 			} else {
-				if (mtkcam_gpio_set(pinSetIdx, CUST_AVDD, 1-PowerCustList.PowerCustInfo[CUST_SUB_AVDD].Voltage)) {
-					PK_DBG("[CAMERA CUST_SUB_AVDD] set gpio failed!!\n");/* 1-voltage for reverse*/
-				} else { pinctrl_select_state(camctrl, cam_ldo_sub_vcama_l); }
-
+				if (mtkcam_gpio_set(pinSetIdx, AVDD, 1-PowerCustList.PowerCustInfo[CUST_SUB_AVDD].Voltage)) {
+						PK_ERR("[CAMERA CUST_SUB_AVDD] set gpio failed!!\n");/* 1-voltage for reverse*/
+				}
 			}
-		} else {	
+		} else {
 			if (PowerCustList.PowerCustInfo[CUST_AVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
 				if (TRUE != _hwPowerDown(pwInfo.PowerType)) {
-					PK_DBG("[CAMERA SENSOR] Fail to enable digital power\n");
+					PK_ERR("[CAMERA SENSOR] Fail to disable analog power\n");
 					return FALSE;
 				}
 			} else {
-				if (mtkcam_gpio_set(pinSetIdx, CUST_AVDD, 1-PowerCustList.PowerCustInfo[CUST_AVDD].Voltage)) {
-					PK_DBG("[CAMERA CUST_AVDD] set gpio failed!!\n");/* 1-voltage for reverse*/
-				} else { pinctrl_select_state(camctrl, cam_ldo_vcama_l); }
+				if (mtkcam_gpio_set(pinSetIdx, AVDD, 1-PowerCustList.PowerCustInfo[CUST_AVDD].Voltage)) {
+						PK_ERR("[CAMERA CUST_AVDD] set gpio failed!!\n");/* 1-voltage for reverse*/
+				}
 			}
 		}
 	} else if (pwInfo.PowerType == DVDD) {
-		if (PowerCustList.PowerCustInfo[1].Gpio_Pin == GPIO_UNSUPPORTED) {
-			if (pinSetIdx == 1) {
-				if (TRUE != _hwPowerDown(SUB_DVDD)) {
-					PK_ERR("[CAMERA SENSOR] Fail to disable digital power\n");
+		if (pinSetIdx == 2) {
+			if (PowerCustList.PowerCustInfo[CUST_MAIN2_DVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
+				if (TRUE != _hwPowerDown(MAIN2_DVDD)) {
+					PK_ERR("[CAMERA SENSOR] Fail to disable main2 digital power\n");
 					return FALSE;
 				}
-			} else if (TRUE != _hwPowerDown(pwInfo.PowerType)) {
-				PK_ERR("[CAMERA SENSOR] Fail to disable digital power\n");
-				return FALSE;
 			} else {
+				if (mtkcam_gpio_set(pinSetIdx, MAIN2_DVDD, 1-PowerCustList.PowerCustInfo[CUST_MAIN2_DVDD].Voltage)) {
+					PK_ERR("[CAMERA CUST_MAIN2_DVDD] off set gpio failed!!\n");
+				}
+			}
+		} else if (pinSetIdx == 1) {
+			if (PowerCustList.PowerCustInfo[CUST_SUB_DVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
+				if (TRUE != _hwPowerDown(SUB_DVDD)) {
+					PK_ERR("[CAMERA SENSOR] Fail to enable sub digital power\n");
+					return FALSE;
+				}
+			} else {
+				if (mtkcam_gpio_set(pinSetIdx, SUB_DVDD, 1-PowerCustList.PowerCustInfo[CUST_SUB_DVDD].Voltage)) {
+					PK_ERR("[CAMERA CUST_SUB_DVDD] off set gpio failed!!\n");
+				}
 			}
 		} else {
-#if 0
-			if (mt_set_gpio_mode
-			    (PowerCustList.PowerCustInfo[1].Gpio_Pin,
-			     PowerCustList.PowerCustInfo[1].Gpio_Mode)) {
-				PK_DBG("[CAMERA LENS] set gpio mode failed!!\n");
+			if (PowerCustList.PowerCustInfo[CUST_DVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
+				if (TRUE != _hwPowerDown(DVDD)) {
+					PK_ERR("[CAMERA SENSOR] Fail to disable main digital power\n");
+					return FALSE;
+				}
+			} else {
+				if (mtkcam_gpio_set(pinSetIdx, DVDD, 1-PowerCustList.PowerCustInfo[CUST_DVDD].Voltage)) {
+					PK_ERR("[CAMERA CUST_DVDD] off set gpio failed!!\n");
+				}
 			}
-			if (mt_set_gpio_dir(PowerCustList.PowerCustInfo[1].Gpio_Pin, GPIO_DIR_OUT)) {
-				PK_DBG("[CAMERA LENS] set gpio dir failed!!\n");
-			}
-			if (mt_set_gpio_out
-			    (PowerCustList.PowerCustInfo[1].Gpio_Pin,
-			     PowerCustList.PowerCustInfo[1].Voltage)) {
-				PK_DBG("[CAMERA LENS] set gpio failed!!\n");
-			}
-#endif
 		}
+
 	} else if (pwInfo.PowerType == DOVDD) {
-		if (PowerCustList.PowerCustInfo[2].Gpio_Pin == GPIO_UNSUPPORTED) {
-			if (TRUE != _hwPowerDown(pwInfo.PowerType)) {
+		if (PowerCustList.PowerCustInfo[CUST_DOVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
+			if (TRUE != _hwPowerDown(DOVDD)) {
 				PK_ERR("[CAMERA SENSOR] Fail to disable io power\n");
 				return FALSE;
 			}
 		} else {
-			if (mtkcam_gpio_set(pinSetIdx, CUST_DOVDD, 1-PowerCustList.PowerCustInfo[CUST_DOVDD].Voltage)) {
+			if (mtkcam_gpio_set(pinSetIdx, DOVDD, 1-PowerCustList.PowerCustInfo[CUST_DOVDD].Voltage)) {
 				PK_ERR("[CAMERA CUST_AVDD] set gpio failed!!\n");/* 1-voltage for reverse*/
 			}
 		}
 	} else if (pwInfo.PowerType == AFVDD) {
-#if 1
-		PK_DBG("[CAMERA SENSOR] Skip AFVDD setting\n");
-		if (PowerCustList.PowerCustInfo[3].Gpio_Pin == GPIO_UNSUPPORTED) {
-			if (TRUE != _hwPowerDown(pwInfo.PowerType)) {
-				PK_DBG("[CAMERA SENSOR] Fail to enable digital power\n");
+#if CONTROL_AF_POWER
+		if (PowerCustList.PowerCustInfo[CUST_AFVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
+			if (TRUE != _hwPowerDown(AFVDD)) {
+				PK_ERR("[CAMERA SENSOR] Fail to disable af power\n");
 				return FALSE;
 			}
-		} /*else {
-			if (mt_set_gpio_mode
-			    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-			     PowerCustList.PowerCustInfo[3].Gpio_Mode)) {
-				PK_DBG("[CAMERA LENS] set gpio mode failed!!\n");
-			}
-			if (mt_set_gpio_dir(PowerCustList.PowerCustInfo[3].Gpio_Pin, GPIO_DIR_OUT)) {
-				PK_DBG("[CAMERA LENS] set gpio dir failed!!\n");
-			}
-			if (mt_set_gpio_out
-			    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-			     PowerCustList.PowerCustInfo[3].Voltage)) {
-				PK_DBG("[CAMERA LENS] set gpio failed!!\n");
-			}*/
-#endif
-#if 0
-			if (PowerCustList.PowerCustInfo[4].Gpio_Pin != GPIO_UNSUPPORTED) {
-				mdelay(5);
-				if (mt_set_gpio_mode
-				    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-				     PowerCustList.PowerCustInfo[3].Gpio_Mode)) {
-					PK_DBG("[CAMERA LENS] set gpio mode failed!!\n");
-				}
-				if (mt_set_gpio_dir
-				    (PowerCustList.PowerCustInfo[3].Gpio_Pin, GPIO_DIR_OUT)) {
-					PK_DBG("[CAMERA LENS] set gpio dir failed!!\n");
-				}
-				if (mt_set_gpio_out
-				    (PowerCustList.PowerCustInfo[3].Gpio_Pin,
-				     PowerCustList.PowerCustInfo[3].Voltage)) {
-					PK_DBG("[CAMERA LENS] set gpio failed!!\n");
-				}
+		} else {
+			if (mtkcam_gpio_set(pinSetIdx, AFVDD, 1-PowerCustList.PowerCustInfo[CUST_AFVDD].Voltage)) {
+				PK_ERR("[CAMERA CUST_AFVDD] set gpio failed!!\n");/* 1-voltage for reverse*/
 			}
 		}
 #endif
@@ -868,9 +848,7 @@ int kdCISModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM SensorIdx, char *currSenso
 
     /* MIPI SWITCH */
 	if(has_mipi_switch){
-		if (DUAL_CAMERA_MAIN_SENSOR == SensorIdx) {
-			pinctrl_select_state(camctrl, cam_mipi_switch_en_h);
-		} else if (DUAL_CAMERA_SUB_SENSOR == SensorIdx) {
+		if (DUAL_CAMERA_SUB_SENSOR == SensorIdx) {
 			pinctrl_select_state(camctrl, cam_mipi_switch_en_l);
 			pinctrl_select_state(camctrl, cam_mipi_switch_sel_h);
 
@@ -1109,7 +1087,9 @@ int kdCISModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM SensorIdx, char *currSenso
  #endif
 	} else {		/* power OFF */
 		if(has_mipi_switch){
-			pinctrl_select_state(camctrl, cam_mipi_switch_en_h);
+			if (DUAL_CAMERA_SUB_SENSOR == SensorIdx || DUAL_CAMERA_MAIN_2_SENSOR == SensorIdx) {
+				pinctrl_select_state(camctrl, cam_mipi_switch_en_h);
+			}
 		}
 		for (pwListIdx = 0; pwListIdx < 16; pwListIdx++) {
 			if (currSensorName && (PowerOnList.PowerSeq[pwListIdx].SensorName != NULL)

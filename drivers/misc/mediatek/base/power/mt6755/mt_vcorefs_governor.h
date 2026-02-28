@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _MT_VCOREFS_GOVERNOR_H
 #define _MT_VCOREFS_GOVERNOR_H
 
@@ -11,21 +24,18 @@
 #define vcorefs_warn(fmt, args...)	\
 	pr_warn(VCPREFS_TAG"[WARN]"fmt, ##args)
 #define vcorefs_info(fmt, args...)	\
-	pr_warn(VCPREFS_TAG""fmt, ##args)	/* pr_info(TAG""fmt, ##args) */
+	pr_warn(VCPREFS_TAG""fmt, ##args)
 #define vcorefs_debug(fmt, args...)	\
 	pr_debug(VCPREFS_TAG""fmt, ##args)
 
-
-/* log_mask[15:0]: show nothing, log_mask[16:31]: show only on MobileLog */
-#define vcorefs_crit_mask(fmt, args...)				\
-do {								\
-	if (pwrctrl->log_mask & (1U << kicker))			\
-		;						\
-	else if ((pwrctrl->log_mask >> 16) & (1U << kicker))	\
-		vcorefs_debug(fmt, ##args);			\
-	else							\
-		vcorefs_crit(fmt, ##args);			\
-} while (0)
+#define DBG_MSG_ENABLE (1U << 31)
+#define vcorefs_debug_mask(type, fmt, args...)	\
+	do {							\
+		if (vcorefs_log_mask & DBG_MSG_ENABLE)		\
+			vcorefs_info(fmt, ##args);		\
+		else if (vcorefs_log_mask & (1U << type))	\
+			vcorefs_info(fmt, ##args);		\
+	} while (0)
 
 struct kicker_config {
 	int kicker;
@@ -56,6 +66,7 @@ enum dvfs_kicker {
 	KIR_PERF,
 	KIR_SYSFS,
 	KIR_SYSFS_N,
+	KIR_GPU,
 	NUM_KICKER,
 
 	/* internal kicker */
@@ -94,6 +105,8 @@ struct opp_profile {
 	int vcore_uv;
 	int ddr_khz;
 };
+
+extern unsigned int vcorefs_log_mask;
 
 extern int kicker_table[LAST_KICKER];
 
@@ -158,9 +171,10 @@ extern int vcorefs_enable_perform_bw(bool enable);
 extern int vcorefs_enable_total_bw(bool enable);
 
 /* screen size */
-extern unsigned int DISP_GetScreenWidth(void);
-extern unsigned int DISP_GetScreenHeight(void);
-
+extern int primary_display_get_width(void);
+extern int primary_display_get_height(void);
+extern int primary_display_get_virtual_width(void);
+extern int primary_display_get_virtual_height(void);
 
 /* AutoK related API */
 extern void governor_autok_manager(void);
@@ -174,4 +188,10 @@ extern void aee_rr_rec_vcore_dvfs_opp(u32 val);
 extern u32 aee_rr_curr_vcore_dvfs_opp(void);
 extern void aee_rr_rec_vcore_dvfs_status(u32 val);
 extern u32 aee_rr_curr_vcore_dvfs_status(void);
+
+/* GPU kicker init opp API */
+extern int vcorefs_gpu_get_init_opp(void);
+extern void  vcorefs_gpu_set_init_opp(int opp);
+extern bool vcorefs_request_init_opp(int kicker, int opp);
+
 #endif				/* _MT_VCOREFS_GOVERNOR_H */

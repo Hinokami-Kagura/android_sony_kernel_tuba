@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
 #include <mt-plat/charging.h>
 #include <mt-plat/upmu_common.h>
 #include <linux/delay.h>
@@ -9,6 +22,7 @@
 #include <mach/mt_pmic.h>
 #include "bq25890.h"
 #include <mach/mt_sleep.h>
+#include "mtk_bif_intf.h"
 /* ============================================================ // */
 /* Define */
 /* ============================================================ // */
@@ -112,6 +126,35 @@ const unsigned int VCDT_HV_VTH[] = {
 	BATTERY_VOLT_10_500000_V
 };
 
+const unsigned int VINDPM_REG[] = {
+	2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000,
+	4100, 4200, 4300, 4400, 4500, 4600, 4700, 4800, 4900, 5000, 5100, 5200, 5300, 5400, 5500,
+	5600, 5700, 5800, 5900, 6000, 6100, 6200, 6300, 6400, 6500, 6600, 6700, 6800, 6900, 7000,
+	7100, 7200, 7300, 7400, 7500, 7600, 7700, 7800, 7900, 8000, 8100, 8200, 8300, 8400, 8500,
+	8600, 8700, 8800, 8900, 9000, 9100, 9200, 9300, 9400, 9500, 9600, 9700, 9800, 9900, 10000,
+	10100, 10200, 10300, 10400, 10500, 10600, 10700, 10800, 10900, 11000, 11100, 11200, 11300,
+	11400, 11500, 11600, 11700, 11800, 11900, 12000, 12100, 12200, 12300, 12400, 12500, 12600,
+	12700, 12800, 12900, 13000, 13100, 13200, 13300, 13400, 13500, 13600, 13700, 13800, 13900,
+	14000, 14100, 14200, 14300, 14400, 14500, 14600, 14700, 14800, 14900, 15000, 15100, 15200,
+	15300
+};
+
+/* BQ25896 REG0A BOOST_LIM[2:0], mA */
+const unsigned int BOOST_CURRENT_LIMIT[] = {
+	500, 750, 1200, 1400, 1650,
+};
+
+
+/* BQ25896 REG08 VCLAMP, mV */
+const unsigned int IRCMP_VOLT_CLAMP[] = {
+	0, 32, 64, 128, 160, 192, 224,
+};
+
+/* BQ25896 REG08 BAT_COMP, mohm */
+const unsigned int IRCMP_RESISTOR[] = {
+	0, 20, 40, 60, 80, 100, 120, 140,
+};
+
 #ifdef CONFIG_MTK_DUAL_INPUT_CHARGER_SUPPORT
 #ifndef CUST_GPIO_VIN_SEL
 #define CUST_GPIO_VIN_SEL 18
@@ -152,14 +195,12 @@ static char *DISO_state_s[8] = {
 /* extern unsigned int mt6311_get_chip_id(void); _not_ used*/
 /* extern int is_mt6311_exist(void); _not_ used */
 /* extern int is_mt6311_sw_ready(void); _not_ used */
-#ifdef CONFIG_MTK_BIF_SUPPORT
-static int bif_exist;
-static int bif_checked;
-#endif
 static unsigned int charging_error;
 static unsigned int charging_get_error_state(void);
-static unsigned int charging_set_error_state(void *data);
-static unsigned int charging_set_vindpm(void *data);
+static int charging_set_error_state(void *data);
+static int charging_set_vindpm(void *data);
+static unsigned int g_input_current;
+DEFINE_MUTEX(g_input_current_mutex);
 
 /* ============================================================ // */
 unsigned int charging_value_to_parameter(const unsigned int *parameter, const unsigned int array_size,
@@ -228,510 +269,39 @@ static unsigned int is_chr_det(void)
 {
 	unsigned int val = 0;
 
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	val = pmic_get_register_value(PMIC_RGS_CHRDET);
+#else
 	val = pmic_get_register_value(MT6351_PMIC_RGS_CHRDET);
+#endif
 	battery_log(BAT_LOG_CRTI, "[is_chr_det] %d\n", val);
 
 	return val;
 }
 #endif
-#ifdef CONFIG_MTK_BIF_SUPPORT
-/* BIF related functions*/
-#define BC (0x400)
-#define SDA (0x600)
-#define ERA (0x100)
-#define WRA (0x200)
-#define RRA (0x300)
-#define WD  (0x000)
-/*bus commands*/
-#define BUSRESET (0x00)
-#define RBL2 (0x22)
-#define RBL4 (0x24)
-
-/*BIF slave address*/
-#define MW3790 (0x00)
-#define MW3790_VBAT (0x0114)
-#define MW3790_TBAT (0x0193)
-void bif_reset_irq(void)
-{
-	unsigned int reg_val = 0;
-	unsigned int loop_i = 0;
-
-	pmic_set_register_value(PMIC_BIF_IRQ_CLR, 1);
-	reg_val = 0;
-	do {
-		reg_val = pmic_get_register_value(PMIC_BIF_IRQ);
-
-		if (loop_i++ > 50) {
-			battery_log(BAT_LOG_CRTI, "[BIF][reset irq]failed.PMIC_BIF_IRQ 0x%x %d\n",
-				    reg_val, loop_i);
-			break;
-		}
-	} while (reg_val != 0);
-	pmic_set_register_value(PMIC_BIF_IRQ_CLR, 0);
-}
-
-void bif_waitfor_slave(void)
-{
-	unsigned int reg_val = 0;
-	int loop_i = 0;
-
-	do {
-		reg_val = pmic_get_register_value(PMIC_BIF_IRQ);
-
-		if (loop_i++ > 50) {
-			battery_log(BAT_LOG_FULL,
-				    "[BIF][waitfor_slave] failed. PMIC_BIF_IRQ=0x%x, loop=%d\n",
-				    reg_val, loop_i);
-			break;
-		}
-	} while (reg_val == 0);
-
-	if (reg_val == 1)
-		battery_log(BAT_LOG_FULL, "[BIF][waitfor_slave]OK at loop=%d.\n", loop_i);
-
-}
-
-int bif_powerup_slave(void)
-{
-	int bat_lost = 0;
-	int total_valid = 0;
-	int timeout = 0;
-	int loop_i = 0;
-
-	do {
-		battery_log(BAT_LOG_CRTI, "[BIF][powerup_slave] set BIF power up register\n");
-		pmic_set_register_value(PMIC_BIF_POWER_UP, 1);
-
-		battery_log(BAT_LOG_FULL, "[BIF][powerup_slave] trigger BIF module\n");
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 1);
-
-		udelay(10);
-
-		bif_waitfor_slave();
-
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 0);
-
-		pmic_set_register_value(PMIC_BIF_POWER_UP, 0);
-
-		/*check_bat_lost(); what to do with this? */
-		bat_lost = pmic_get_register_value(PMIC_BIF_BAT_LOST);
-		total_valid = pmic_get_register_value(PMIC_BIF_TOTAL_VALID);
-		timeout = pmic_get_register_value(PMIC_BIF_TIMEOUT);
-
-		if (loop_i < 5) {
-			loop_i++;
-		} else {
-			battery_log(BAT_LOG_CRTI, "[BIF][powerup_slave]Failed at loop=%d", loop_i);
-			break;
-		}
-	} while (bat_lost == 1 || total_valid == 1 || timeout == 1);
-	if (loop_i < 5) {
-		battery_log(BAT_LOG_FULL, "[BIF][powerup_slave]OK at loop=%d", loop_i);
-	bif_reset_irq();
-		return 1;
-	}
-
-	return -1;
-}
-
-void bif_set_cmd(int bif_cmd[], int bif_cmd_len)
-{
-	int i = 0;
-	int con_index = 0;
-	unsigned int ret = 0;
-
-	for (i = 0; i < bif_cmd_len; i++) {
-		ret = pmic_config_interface(MT6351_BIF_CON0 + con_index, bif_cmd[i], 0x07FF, 0);
-		con_index += 0x2;
-	}
-}
-
-
-int bif_reset_slave(void)
-{
-	int ret = 0;
-	int bat_lost = 0;
-	int total_valid = 0;
-	int timeout = 0;
-	int bif_cmd[1] = { 0 };
-	int loop_i = 0;
-
-	/*set command sequence */
-	bif_cmd[0] = BC | BUSRESET;
-	bif_set_cmd(bif_cmd, 1);
-
-	do {
-		/*command setting : 1 write command */
-		ret = pmic_set_register_value(PMIC_BIF_TRASFER_NUM, 1);
-		ret = pmic_set_register_value(PMIC_BIF_COMMAND_TYPE, 0);
-
-		/*Command set trigger */
-		ret = pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 1);
-
-		udelay(10);
-		/*Command sent; wait for slave */
-		bif_waitfor_slave();
-
-		/*Command clear trigger */
-		ret = pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 0);
-		/*check transaction completeness */
-		bat_lost = pmic_get_register_value(PMIC_BIF_BAT_LOST);
-		total_valid = pmic_get_register_value(PMIC_BIF_TOTAL_VALID);
-		timeout = pmic_get_register_value(PMIC_BIF_TIMEOUT);
-
-		if (loop_i < 50)
-			loop_i++;
-		else {
-			battery_log(BAT_LOG_CRTI, "[BIF][bif_reset_slave]Failed at loop=%d",
-				    loop_i);
-			break;
-		}
-	} while (bat_lost == 1 || total_valid == 1 || timeout == 1);
-
-	if (loop_i < 50) {
-		battery_log(BAT_LOG_FULL, "[BIF][bif_reset_slave]OK at loop=%d", loop_i);
-	/*reset BIF_IRQ */
-	bif_reset_irq();
-		return 1;
-	}
-	return -1;
-}
-
-/*BIF WRITE 8 transaction*/
-int bif_write8(int addr, int *data)
-{
-	int ret = 1;
-	int era, wra;
-	int bif_cmd[4] = { 0, 0, 0, 0};
-	int loop_i = 0;
-	int bat_lost = 0;
-	int total_valid = 0;
-	int timeout = 0;
-
-	era = (addr & 0xFF00) >> 8;
-	wra = addr & 0x00FF;
-	battery_log(BAT_LOG_FULL, "[BIF][bif_write8]ERA=%x, WRA=%x\n", era, wra);
-	/*set command sequence */
-	bif_cmd[0] = SDA | MW3790;
-	bif_cmd[1] = ERA | era;	/*[15:8] */
-	bif_cmd[2] = WRA | wra;	/*[ 7:0] */
-	bif_cmd[3] = WD  | (*data & 0xFF);	/*data*/
-
-
-	bif_set_cmd(bif_cmd, 4);
-	do {
-		/*command setting : 4 transactions for 1 byte write command(0) */
-		pmic_set_register_value(PMIC_BIF_TRASFER_NUM, 4);
-		pmic_set_register_value(PMIC_BIF_COMMAND_TYPE, 0);
-
-		/*Command set trigger */
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 1);
-
-		udelay(200);
-		/*Command sent; wait for slave */
-		bif_waitfor_slave();
-
-		/*Command clear trigger */
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 0);
-		/*check transaction completeness */
-		bat_lost = pmic_get_register_value(PMIC_BIF_BAT_LOST);
-		total_valid = pmic_get_register_value(PMIC_BIF_TOTAL_VALID);
-		timeout = pmic_get_register_value(PMIC_BIF_TIMEOUT);
-
-		if (loop_i <= 50)
-			loop_i++;
-		else {
-			battery_log(BAT_LOG_CRTI,
-		"[BIF][bif_write8] Failed. bat_lost = %d, timeout = %d, totoal_valid = %d\n",
-		bat_lost, timeout, total_valid);
-			ret = -1;
-			break;
-		}
-	} while (bat_lost == 1 || total_valid == 1 || timeout == 1);
-
-	if (ret == 1)
-		battery_log(BAT_LOG_FULL, "[BIF][bif_write8] OK for %d loop(s)\n", loop_i);
-	else
-		battery_log(BAT_LOG_CRTI, "[BIF][bif_write8] Failed for %d loop(s)\n", loop_i);
-
-	/*reset BIF_IRQ */
-	bif_reset_irq();
-
-	return ret;
-}
-
-/*BIF READ 8 transaction*/
-int bif_read8(int addr, int *data)
-{
-	int ret = 1;
-	int era, rra;
-	int val = -1;
-	int bif_cmd[3] = { 0, 0, 0 };
-	int loop_i = 0;
-	int bat_lost = 0;
-	int total_valid = 0;
-	int timeout = 0;
-
-	battery_log(BAT_LOG_FULL, "[BIF][READ8]\n");
-
-	era = (addr & 0xFF00) >> 8;
-	rra = addr & 0x00FF;
-	battery_log(BAT_LOG_FULL, "[BIF][bif_read8]ERA=%x, RRA=%x\n", era, rra);
-	/*set command sequence */
-	bif_cmd[0] = SDA | MW3790;
-	bif_cmd[1] = ERA | era;	/*[15:8] */
-	bif_cmd[2] = RRA | rra;	/*[ 7:0] */
-
-	bif_set_cmd(bif_cmd, 3);
-	do {
-		/*command setting : 3 transactions for 1 byte read command(1) */
-		pmic_set_register_value(PMIC_BIF_TRASFER_NUM, 3);
-		pmic_set_register_value(PMIC_BIF_COMMAND_TYPE, 1);
-		pmic_set_register_value(PMIC_BIF_READ_EXPECT_NUM, 1);
-
-		/*Command set trigger */
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 1);
-
-		udelay(200);
-		/*Command sent; wait for slave */
-		bif_waitfor_slave();
-
-		/*Command clear trigger */
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 0);
-		/*check transaction completeness */
-		bat_lost = pmic_get_register_value(PMIC_BIF_BAT_LOST);
-		total_valid = pmic_get_register_value(PMIC_BIF_TOTAL_VALID);
-		timeout = pmic_get_register_value(PMIC_BIF_TIMEOUT);
-
-		if (loop_i <= 50)
-			loop_i++;
-		else {
-			battery_log(BAT_LOG_CRTI,
-		"[BIF][bif_read16] Failed. bat_lost = %d, timeout = %d, totoal_valid = %d\n",
-		bat_lost, timeout, total_valid);
-			ret = -1;
-			break;
-		}
-	} while (bat_lost == 1 || total_valid == 1 || timeout == 1);
-
-	/*Read data */
-	if (ret == 1) {
-		val = pmic_get_register_value(PMIC_BIF_DATA_0);
-		battery_log(BAT_LOG_FULL, "[BIF][bif_read8] OK d0=0x%x, for %d loop(s)\n",
-			    val, loop_i);
-	} else
-		battery_log(BAT_LOG_CRTI, "[BIF][bif_read8] Failed for %d loop(s)\n", loop_i);
-
-	/*reset BIF_IRQ */
-	bif_reset_irq();
-
-	*data = val;
-	return ret;
-}
-
-/*bif read 16 transaction*/
-int bif_read16(int addr)
-{
-	int ret = 1;
-	int era, rra;
-	int val = -1;
-	int bif_cmd[4] = { 0, 0, 0, 0 };
-	int loop_i = 0;
-	int bat_lost = 0;
-	int total_valid = 0;
-	int timeout = 0;
-
-	battery_log(BAT_LOG_FULL, "[BIF][READ]\n");
-
-	era = (addr & 0xFF00) >> 8;
-	rra = addr & 0x00FF;
-	battery_log(BAT_LOG_FULL, "[BIF][bif_read16]ERA=%x, RRA=%x\n", era, rra);
-	/*set command sequence */
-	bif_cmd[0] = SDA | MW3790;
-	bif_cmd[1] = BC | RBL2;	/* read back 2 bytes */
-	bif_cmd[2] = ERA | era;	/*[15:8] */
-	bif_cmd[3] = RRA | rra;	/*[ 7:0] */
-
-	bif_set_cmd(bif_cmd, 4);
-	do {
-		/*command setting : 4 transactions for 2 byte read command(1) */
-		pmic_set_register_value(PMIC_BIF_TRASFER_NUM, 4);
-		pmic_set_register_value(PMIC_BIF_COMMAND_TYPE, 1);
-		pmic_set_register_value(PMIC_BIF_READ_EXPECT_NUM, 2);
-
-		/*Command set trigger */
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 1);
-
-		udelay(200);
-		/*Command sent; wait for slave */
-		bif_waitfor_slave();
-
-		/*Command clear trigger */
-		pmic_set_register_value(PMIC_BIF_TRASACT_TRIGGER, 0);
-		/*check transaction completeness */
-		bat_lost = pmic_get_register_value(PMIC_BIF_BAT_LOST);
-		total_valid = pmic_get_register_value(PMIC_BIF_TOTAL_VALID);
-		timeout = pmic_get_register_value(PMIC_BIF_TIMEOUT);
-
-		if (loop_i <= 50)
-			loop_i++;
-		else {
-			battery_log(BAT_LOG_CRTI,
-		"[BIF][bif_read16] Failed. bat_lost = %d, timeout = %d, totoal_valid = %d\n",
-		bat_lost, timeout, total_valid);
-			ret = -1;
-			break;
-		}
-	} while (bat_lost == 1 || total_valid == 1 || timeout == 1);
-
-	/*Read data */
-	if (ret == 1) {
-		int d0, d1;
-
-		d0 = pmic_get_register_value(PMIC_BIF_DATA_0);
-		d1 = pmic_get_register_value(PMIC_BIF_DATA_1);
-		val = 0xFF & d1;
-		val = val | ((d0 & 0xFF) << 8);
-		battery_log(BAT_LOG_FULL, "[BIF][bif_read16] OK d0=0x%x, d1=0x%x for %d loop(s)\n",
-			    d0, d1, loop_i);
-	} else
-		battery_log(BAT_LOG_CRTI, "[BIF][bif_read16] Failed for %d loop(s)\n", loop_i);
-
-	/*reset BIF_IRQ */
-	bif_reset_irq();
-
-
-	return val;
-}
-
-void bif_ADC_enable(void)
-{
-	int reg = 0x18;
-
-	bif_write8(0x0110, &reg);
-	mdelay(50);
-
-	reg = 0x98;
-	bif_write8(0x0110, &reg);
-	mdelay(50);
-
-}
-
-/* BIF init function called only at the first time*/
-int bif_init(void)
-{
-	int pwr, rst;
-	/*disable BIF interrupt */
-	pmic_set_register_value(PMIC_INT_CON0_CLR, 0x4000);
-	/*enable BIF clock */
-	pmic_set_register_value(PMIC_TOP_CKPDN_CON2_CLR, 0x0070);
-
-	/*enable HT protection */
-	pmic_set_register_value(PMIC_RG_BATON_HT_EN, 1);
-
-	/*change to HW control mode*/
-	/*pmic_set_register_value(MT6351_PMIC_RG_VBIF28_ON_CTRL, 0);*/
-	/*pmic_set_register_value(MT6351_PMIC_RG_VBIF28_EN, 1);*/
-	mdelay(50);
-
-	/*Enable RX filter function */
-	pmic_set_register_value(MT6351_PMIC_BIF_RX_DEG_EN, 0x8000);
-	pmic_set_register_value(MT6351_PMIC_BIF_RX_DEG_WND, 0x17);
-	pmic_set_register_value(PMIC_RG_BATON_EN, 0x1);
-	pmic_set_register_value(PMIC_BATON_TDET_EN, 0x1);
-	pmic_set_register_value(PMIC_RG_BATON_HT_EN_DLY_TIME, 0x1);
-
-
-	/*wake up BIF slave */
-	pwr = bif_powerup_slave();
-	mdelay(10);
-	rst = bif_reset_slave();
-
-	/*pmic_set_register_value(MT6351_PMIC_RG_VBIF28_ON_CTRL, 1);*/
-	mdelay(50);
-
-	battery_log(BAT_LOG_CRTI, "[BQ25896][BIF_init] done.");
-
-	if (pwr + rst == 2)
-		return 1;
-
-	return -1;
-}
-#endif
 
 //CEI comment start//
-extern int battery_id_invalid;
 //JEITA enable
-static unsigned int charging_set_cv_voltage(void *data);
+static int charging_set_cv_voltage(void *data);
 extern BATTERY_VOLTAGE_ENUM global_cv_voltage;
 //CEI comment end//
 
-static unsigned int charging_hw_init(void *data)
+static int charging_hw_init(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
-	bq25890_config_interface(bq25890_CON2, 0x1, 0x1, 4);	/* disable ico Algorithm -->bear:en */
-	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 3);	/* disable HV DCP for gq25897 */
-	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 2);	/* disbale MaxCharge for gq25897 */
-	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 1);	/* disable DPDM detection */
-
-	bq25890_config_interface(bq25890_CON7, 0x1, 0x3, 4);	/* enable  watch dog 40 secs 0x1 */
-//CEI comment start
-//Safety timer
-	bq25890_config_interface(bq25890_CON7, 0x0, 0x1, 3);	/* enable charging timer safety timer */
-//CEI comment end
-	bq25890_config_interface(bq25890_CON7, 0x2, 0x3, 1);	/* charging timer 12h */
-
-	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 5);	/* boost freq 1.5MHz when OTG_CONFIG=1 */
-	bq25890_config_interface(bq25890_CONA, 0x7, 0xF, 4);	/* boost voltagte 4.998V default */
-//CEI comment start//
-	bq25890_config_interface(bq25890_CONA, 0x1, 0x7, 0);	/* boost current limit 0.75A */
-//CEI comment end//
-#ifdef CONFIG_MTK_BIF_SUPPORT
-	bq25890_config_interface(bq25890_CON8, 0x4, 0x7, 5);	/* enable ir_comp_resistance */
-	bq25890_config_interface(bq25890_CON8, 0x7, 0x7, 2);	/* enable ir_comp_vdamp */
-#else
-	bq25890_config_interface(bq25890_CON8, 0x0, 0x7, 5);	/* disable ir_comp_resistance */
-	bq25890_config_interface(bq25890_CON8, 0x0, 0x7, 2);	/* disable ir_comp_vdamp */
-#endif
-	bq25890_config_interface(bq25890_CON8, 0x3, 0x3, 0);	/* thermal 120 default */
-
-	bq25890_config_interface(bq25890_CON9, 0x0, 0x1, 4);	/* JEITA_VSET: VREG-200mV */
-	bq25890_config_interface(bq25890_CON7, 0x1, 0x1, 0);	/* JEITA_ISet : 20% x ICHG */
-
-	bq25890_config_interface(bq25890_CON3, 0x5, 0x7, 1);	/* System min voltage default 3.5V */
-
-	/*PreCC mode */
-	bq25890_config_interface(bq25890_CON5, 0x1, 0xF, 4);	/* precharge current default 128mA */
-	bq25890_config_interface(bq25890_CON6, 0x1, 0x1, 1);	/* precharge2cc voltage,BATLOWV, 3.0V */
-
-	/*CV mode */
-//CEI comment start//
-//VREG jumps will cause charging full detection issue for 4.2V battery
-//JEITA enable
-#if !defined(CONFIG_MTK_JEITA_STANDARD_SUPPORT)
-	if(battery_id_invalid == 0)
-		bq25890_config_interface(bq25890_CON6, 0x1D, 0x3F, 2);	/* VREG=CV 4.304V (default 4.208V) */
-	else
-		bq25890_config_interface(bq25890_CON6, 0x16, 0x3F, 2);	/* VREG=CV 4.192V (default 4.208V) */
-#else
-	charging_set_cv_voltage(&global_cv_voltage);
-#endif
-//CEI commend end//
-	bq25890_config_interface(bq25890_CON6, 0x0, 0x1, 0);	/* recharge voltage@VRECHG=CV-100MV */
-	bq25890_config_interface(bq25890_CON7, 0x1, 0x1, 7);	/* disable ICHG termination detect */
-//CEI comment start
-//Set Iterm at 128mA
-	bq25890_config_interface(bq25890_CON5, 0x1, 0x7, 0);	/* termianation current default 128mA */
-	/*Vbus current limit */
-//Set IINLIM at 500mA
-//	bq25890_config_interface(bq25890_CON0, 0x08, 0x3F, 0);	/* input current limit, IINLIM, 3.25A */ //MTK has marked
-//	bq25890_config_interface(bq25890_CON0, 0x01, 0x01, 6);	/* enable ilimit Pin */ //MTK has marked
-
-	 /*DPM*/ bq25890_config_interface(bq25890_CON1, 0x6, 0xF, 0);	/* Vindpm offset  600MV */
 	bq25890_config_interface(bq25890_COND, 0x1, 0x1, 7);	/* vindpm vth 0:relative 1:absolute */
-//CEI comment end
 
+//CEI comment start//
+//Iterm (IEOC) will be reset back to 256mA after device suspend longer than charger IC Wdog time
+	bq25890_config_interface(bq25890_CON5, 0x1, 0x7, 0);	/* termianation current default 128mA */
+//CEI comment end//
+
+//CEI comment start
+//Safety_timer
+//Safety Timer will be reset back to Enabled after device suspend longer than charger IC Wdog time
+	bq25890_config_interface(bq25890_CON7, 0x0, 0x1, 3);	/* disable charging timer safety timer */
+//CEI comment end
 
 #if defined(MTK_WIRELESS_CHARGER_SUPPORT)
 	if (wireless_charger_gpio_number != 0) {
@@ -755,11 +325,11 @@ static unsigned int charging_hw_init(void *data)
 	return status;
 }
 
-static unsigned int charging_get_bif_vbat(void *data);
+static int charging_get_bif_vbat(void *data);
 
-static unsigned int charging_dump_register(void *data)
+static int charging_dump_register(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 	battery_log(BAT_LOG_FULL, "charging_dump_register\r\n");
 	bq25890_dump_register();
@@ -773,22 +343,22 @@ static unsigned int charging_dump_register(void *data)
 }
 
 //CEI comment start//
-static unsigned int charging_dump_register_get_data(void *data)
+static int charging_dump_register_get_data(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int val;
 
 	battery_log(BAT_LOG_FULL, "charging_dump_register\r\n");
 	val = bq25890_dump_register_get_data();
-	*(unsigned int *) data = val;
+	*(int *) data = (int)val;
 
 	return status;
 }
 //CEI comment end//
 
-static unsigned int charging_enable(void *data)
+static int charging_enable(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int enable = *(unsigned int *) (data);
 
 	if (KAL_TRUE == enable) {
@@ -807,9 +377,9 @@ static unsigned int charging_enable(void *data)
 	return status;
 }
 
-static unsigned int charging_set_cv_voltage(void *data)
+static int charging_set_cv_voltage(void *data)
 {
-	unsigned int status;
+	int status;
 	unsigned short int array_size;
 	unsigned int set_cv_voltage;
 	unsigned short int register_value;
@@ -822,31 +392,32 @@ static unsigned int charging_set_cv_voltage(void *data)
 	register_value =
 	    charging_parameter_to_value(VBAT_CV_VTH, GETARRAYNUM(VBAT_CV_VTH), set_cv_voltage);
 	battery_log(BAT_LOG_CRTI, "charging_set_cv_voltage register_value=0x%x %d %d\n",
-	register_value, *(unsigned int *) data, set_cv_voltage);
+		    register_value, *(unsigned int *) data, set_cv_voltage);
 	bq25890_set_vreg(register_value);
 
 	return status;
 }
 
-static unsigned int charging_get_current(void *data)
+
+static int charging_get_current(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int array_size;
 	/*unsigned char reg_value; */
 	unsigned int val;
 
 	/*Get current level */
 	array_size = GETARRAYNUM(CS_VTH);
-	val = bq25890_get_ichg();
-	*(unsigned int *) data = val;
-	/* *(unsigned int *)data = charging_value_to_parameter(CS_VTH,array_size,val); */
+	val = bq25890_get_reg_ichg();
+	*(unsigned int *)data = charging_value_to_parameter(CS_VTH, array_size, val);
 
 	return status;
 }
 
-static unsigned int charging_set_current(void *data)
+
+static int charging_set_current(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int set_chr_current;
 	unsigned int array_size;
 	unsigned int register_value;
@@ -855,26 +426,29 @@ static unsigned int charging_set_current(void *data)
 	array_size = GETARRAYNUM(CS_VTH);
 	set_chr_current = bmt_find_closest_level(CS_VTH, array_size, current_value);
 	register_value = charging_parameter_to_value(CS_VTH, array_size, set_chr_current);
-	battery_log(BAT_LOG_CRTI, "charging_set_ICHG:%d\n", register_value);
+	battery_log(BAT_LOG_FULL, "charging_set_ICHG:%d\n", register_value);
 
 	bq25890_set_ichg(register_value);
 
 	return status;
 }
 
-static unsigned int charging_set_input_current(void *data)
+static int charging_set_input_current(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int current_value = *(unsigned int *) data;
 	unsigned int set_chr_current;
 	unsigned int array_size;
 	unsigned int register_value;
 
+	mutex_lock(&g_input_current_mutex);
 	array_size = GETARRAYNUM(INPUT_CS_VTH);
 	set_chr_current = bmt_find_closest_level(INPUT_CS_VTH, array_size, current_value);
+	g_input_current = set_chr_current;
 	register_value = charging_parameter_to_value(INPUT_CS_VTH, array_size, set_chr_current);
-	battery_log(BAT_LOG_CRTI, "charging_set_input_current:%d\n", register_value);
+	battery_log(BAT_LOG_FULL, "charging_set_input_current:%d\n", register_value);
 	bq25890_set_iinlim(register_value);
+	mutex_unlock(&g_input_current_mutex);
 
 	/*For USB_IF compliance test only when USB is in suspend(Ibus < 2.5mA) or unconfigured(Ibus < 70mA) states*/
 #ifdef CONFIG_USBIF_COMPLIANCE
@@ -882,15 +456,16 @@ static unsigned int charging_set_input_current(void *data)
 		register_value = 0x7f;
 	else
 		register_value = 0x13;
-	bq25890_set_VINDPM(register_value);
+
+	charging_set_vindpm(&register_value);
 #endif
 
 	return status;
 }
 
-static unsigned int charging_get_charging_status(void *data)
+static int charging_get_charging_status(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned char reg_value;
 
 	bq25890_read_interface(bq25890_CONB, &reg_value, 0x3, 3);	/* ICHG to BAT */
@@ -903,20 +478,18 @@ static unsigned int charging_get_charging_status(void *data)
 	return status;
 }
 
-static unsigned int charging_reset_watch_dog_timer(void *data)
+static int charging_reset_watch_dog_timer(void *data)
 {
-	unsigned int status = STATUS_OK;
-
-	pr_info("charging_reset_watch_dog_timer\r\n");
+	int status = STATUS_OK;
 
 	bq25890_config_interface(bq25890_CON3, 0x1, 0x1, 6);	/* reset watchdog timer */
 
 	return status;
 }
 
-static unsigned int charging_set_hv_threshold(void *data)
+static int charging_set_hv_threshold(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int set_hv_voltage;
 	unsigned int array_size;
 	unsigned short int register_value;
@@ -925,30 +498,49 @@ static unsigned int charging_set_hv_threshold(void *data)
 	array_size = GETARRAYNUM(VCDT_HV_VTH);
 	set_hv_voltage = bmt_find_closest_level(VCDT_HV_VTH, array_size, voltage);
 	register_value = charging_parameter_to_value(VCDT_HV_VTH, array_size, set_hv_voltage);
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	pmic_set_register_value(PMIC_RG_VCDT_HV_VTH, register_value);
+#else
 	pmic_set_register_value(MT6351_PMIC_RG_VCDT_HV_VTH, register_value);
+#endif
 
 	return status;
 }
 
 
-static unsigned int charging_get_hv_status(void *data)
+static int charging_get_hv_status(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	*(kal_bool *) (data) = pmic_get_register_value(PMIC_RGS_VCDT_HV_DET);
+#else
 	*(kal_bool *) (data) = pmic_get_register_value(MT6351_PMIC_RGS_VCDT_HV_DET);
+#endif
 	return status;
 }
 
 
-static unsigned int charging_get_battery_status(void *data)
+static int charging_get_battery_status(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 #if defined(CONFIG_POWER_EXT) || defined(CONFIG_MTK_FPGA)
 	*(kal_bool *) (data) = 0;
 	battery_log(BAT_LOG_CRTI, "bat exist for evb\n");
 #else
 	unsigned int val = 0;
 
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	val = pmic_get_register_value(PMIC_BATON_TDET_EN);
+	battery_log(BAT_LOG_FULL, "[charging_get_battery_status] BATON_TDET_EN = %d\n", val);
+	if (val) {
+		pmic_set_register_value(PMIC_BATON_TDET_EN, 1);
+		pmic_set_register_value(PMIC_RG_BATON_EN, 1);
+		*(kal_bool *) (data) = pmic_get_register_value(PMIC_RGS_BATON_UNDET);
+	} else {
+		*(kal_bool *) (data) = KAL_FALSE;
+	}
+#else
 	val = pmic_get_register_value(MT6351_PMIC_BATON_TDET_EN);
 	battery_log(BAT_LOG_FULL, "[charging_get_battery_status] BATON_TDET_EN = %d\n", val);
 	if (val) {
@@ -959,19 +551,24 @@ static unsigned int charging_get_battery_status(void *data)
 		*(kal_bool *) (data) = KAL_FALSE;
 	}
 #endif
+#endif
 	return status;
 }
 
 
-static unsigned int charging_get_charger_det_status(void *data)
+static int charging_get_charger_det_status(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(CONFIG_MTK_FPGA)
 	*(kal_bool *) (data) = 1;
 	battery_log(BAT_LOG_CRTI, "chr exist for fpga\n");
 #else
-	*(kal_bool *) (data) = pmic_get_register_value(MT6351_PMIC_RGS_CHRDET);
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	*(kal_bool *) (data) = pmic_get_register_value_nolock(PMIC_RGS_CHRDET);
+#else
+	*(kal_bool *) (data) = pmic_get_register_value_nolock(MT6351_PMIC_RGS_CHRDET);
+#endif
 #endif
 	return status;
 }
@@ -983,9 +580,9 @@ kal_bool charging_type_detection_done(void)
 }
 
 
-static unsigned int charging_get_charger_type(void *data)
+static int charging_get_charger_type(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(CONFIG_POWER_EXT) || defined(CONFIG_MTK_FPGA)
 	*(CHARGER_TYPE *) (data) = STANDARD_HOST;
@@ -1032,9 +629,9 @@ static unsigned int charging_get_charger_type(void *data)
 	return status;
 }
 
-static unsigned int charging_get_is_pcm_timer_trigger(void *data)
+static int charging_get_is_pcm_timer_trigger(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(CONFIG_POWER_EXT) || defined(CONFIG_MTK_FPGA)
 	*(kal_bool *) (data) = KAL_FALSE;
@@ -1044,15 +641,15 @@ static unsigned int charging_get_is_pcm_timer_trigger(void *data)
 	else
 		*(kal_bool *) (data) = KAL_FALSE;
 
-	battery_log(BAT_LOG_FULL, "slp_get_wake_reason=%d\n", slp_get_wake_reason());
+	battery_log(BAT_LOG_CRTI, "slp_get_wake_reason=%d\n", slp_get_wake_reason());
 #endif
 
 	return status;
 }
 
-static unsigned int charging_set_platform_reset(void *data)
+static int charging_set_platform_reset(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(CONFIG_POWER_EXT) || defined(CONFIG_MTK_FPGA)
 #else
@@ -1063,9 +660,9 @@ static unsigned int charging_set_platform_reset(void *data)
 	return status;
 }
 
-static unsigned int charging_get_platform_boot_mode(void *data)
+static int charging_get_platform_boot_mode(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(CONFIG_POWER_EXT) || defined(CONFIG_MTK_FPGA)
 #else
@@ -1077,9 +674,9 @@ static unsigned int charging_get_platform_boot_mode(void *data)
 	return status;
 }
 
-static unsigned int charging_set_power_off(void *data)
+static int charging_set_power_off(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(CONFIG_POWER_EXT) || defined(CONFIG_MTK_FPGA)
 #else
@@ -1092,9 +689,9 @@ static unsigned int charging_set_power_off(void *data)
 	return status;
 }
 
-static unsigned int charging_get_power_source(void *data)
+static int charging_get_power_source(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if 0				/* #if defined(MTK_POWER_EXT_DETECT) */
 	if (MT_BOARD_PHONE == mt_get_board_type())
@@ -1108,12 +705,12 @@ static unsigned int charging_get_power_source(void *data)
 	return status;
 }
 
-static unsigned int charging_get_csdac_full_flag(void *data)
+static int charging_get_csdac_full_flag(void *data)
 {
 	return STATUS_UNSUPPORTED;
 }
 
-static unsigned int charging_set_ta_current_pattern(void *data)
+static int charging_set_ta_current_pattern(void *data)
 {
 	kal_bool pumpup;
 	unsigned int increase;
@@ -1245,260 +842,76 @@ static unsigned int charging_set_ta_current_pattern(void *data)
 	return STATUS_OK;
 }
 
-static unsigned int charging_set_ta20_reset(void *data)
+static int charging_set_vindpm(void *data)
 {
-//CEI comment start//
-	bq25890_set_VINDPM(0x12); // 4.4V
-//CEI comment end//
-	bq25890_set_ichg(8);
+	int status = STATUS_OK;
+	unsigned int v = *(unsigned int *) data;
 
-	bq25890_set_ico_en_start(0);
-	bq25890_set_iinlim(0x0);
-	msleep(250);
-	bq25890_set_iinlim(0xc);
-	bq25890_set_ico_en_start(1);
+	bq25890_set_vindpm(v);
+
+	return status;
+}
+
+//CEI comment start//
+static int charging_set_default_dpm(void *data)
+{
+	unsigned int status = STATUS_OK;
+	unsigned int v = *(unsigned int *) data;
+	unsigned int vindpm = (v-2600)/100;
+
+	bq25890_set_force_vindpm(1);
+	bq25890_set_vindpm(vindpm);
+
+	battery_log(BAT_LOG_CRTI, "LE(K)=> charging_set_default_dpm %d %d\n", v, vindpm);
+
+	return status;
+}
+//CEI comment end//
+
+static int charging_set_vbus_ovp_en(void *data)
+{
+	int status = STATUS_OK;
+	unsigned int e = *(unsigned int *) data;
+
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	pmic_set_register_value(PMIC_RG_VCDT_HV_EN, e);
+#else
+	pmic_set_register_value(MT6351_PMIC_RG_VCDT_HV_EN, e);
+#endif
+
+	return status;
+}
+
+static int charging_get_bif_vbat(void *data)
+{
+	int ret = 0;
+	u32 vbat = 0;
+
+	ret = mtk_bif_get_vbat(&vbat);
+	if (ret < 0)
+		return STATUS_UNSUPPORTED;
+
+	*((u32 *)data) = vbat;
+
 	return STATUS_OK;
 }
 
-
-struct timespec ptime[13];
-
-static int cptime[13][2];
-
-static int dtime(int i)
+static int charging_get_bif_tbat(void *data)
 {
-	struct timespec time;
+	int ret = 0, tbat = 0;
 
-	time = timespec_sub(ptime[i], ptime[i-1]);
-	return time.tv_nsec/1000000;
+	ret = mtk_bif_get_tbat(&tbat);
+	if (ret < 0)
+		return STATUS_UNSUPPORTED;
+
+	*((int *)data) = tbat;
+
+	return STATUS_OK;
 }
 
-#define PEOFFTIME 40
-#define PEONTIME 90
-
-static unsigned int charging_set_ta20_current_pattern(void *data)
+static int charging_diso_init(void *data)
 {
-	int value;
-	int i, j = 0;
-	int flag;
-	CHR_VOLTAGE_ENUM chr_vol = *(CHR_VOLTAGE_ENUM *) data;
-	int errcnt = 0;
-
-//CEI comment start//
-	bq25890_set_VINDPM(0x12); // 4.4V
-//CEI comment end//
-	bq25890_set_ichg(8);
-	bq25890_set_ico_en_start(0);
-
-	usleep_range(1000, 1200);
-	value = (chr_vol - CHR_VOLT_05_500000_V) / CHR_VOLT_00_500000_V;
-
-	bq25890_set_iinlim(0x0);
-	msleep(70);
-
-	get_monotonic_boottime(&ptime[j++]);
-	for (i = 4; i >= 0; i--) {
-		flag = value & (1 << i);
-
-		if (flag == 0) {
-			bq25890_set_iinlim(0xc);
-			msleep(PEOFFTIME);
-			get_monotonic_boottime(&ptime[j]);
-			cptime[j][0] = PEOFFTIME;
-			cptime[j][1] = dtime(j);
-			if (cptime[j][1] < 30 || cptime[j][1] > 65) {
-				battery_log(BAT_LOG_CRTI,
-					"charging_set_ta20_current_pattern fail1: idx:%d target:%d actual:%d\n",
-					i, PEOFFTIME, cptime[j][1]);
-				errcnt = 1;
-				return STATUS_FAIL;
-			}
-			j++;
-			bq25890_set_iinlim(0x0);
-			msleep(PEONTIME);
-			get_monotonic_boottime(&ptime[j]);
-			cptime[j][0] = PEONTIME;
-			cptime[j][1] = dtime(j);
-			if (cptime[j][1] < 90 || cptime[j][1] > 115) {
-				battery_log(BAT_LOG_CRTI,
-					"charging_set_ta20_current_pattern fail2: idx:%d target:%d actual:%d\n",
-					i, PEOFFTIME, cptime[j][1]);
-				errcnt = 1;
-				return STATUS_FAIL;
-			}
-			j++;
-
-		} else {
-			bq25890_set_iinlim(0xc);
-			msleep(PEONTIME);
-			get_monotonic_boottime(&ptime[j]);
-			cptime[j][0] = PEONTIME;
-			cptime[j][1] = dtime(j);
-			if (cptime[j][1] < 90 || cptime[j][1] > 115) {
-				battery_log(BAT_LOG_CRTI,
-					"charging_set_ta20_current_pattern fail3: idx:%d target:%d actual:%d\n",
-					i, PEOFFTIME, cptime[j][1]);
-				errcnt = 1;
-				return STATUS_FAIL;
-			}
-			j++;
-			bq25890_set_iinlim(0x0);
-			msleep(PEOFFTIME);
-			get_monotonic_boottime(&ptime[j]);
-			cptime[j][0] = PEOFFTIME;
-			cptime[j][1] = dtime(j);
-			if (cptime[j][1] < 30 || cptime[j][1] > 65) {
-				battery_log(BAT_LOG_CRTI,
-					"charging_set_ta20_current_pattern fail4: idx:%d target:%d actual:%d\n",
-					i, PEOFFTIME, cptime[j][1]);
-				errcnt = 1;
-				return STATUS_FAIL;
-			}
-			j++;
-		}
-	}
-
-	bq25890_set_iinlim(0xc);
-	msleep(160);
-	get_monotonic_boottime(&ptime[j]);
-	cptime[j][0] = 160;
-	cptime[j][1] = dtime(j);
-	if (cptime[j][1] < 150 || cptime[j][1] > 240) {
-		battery_log(BAT_LOG_CRTI,
-			"charging_set_ta20_current_pattern fail5: idx:%d target:%d actual:%d\n",
-			i, PEOFFTIME, cptime[j][1]);
-		errcnt = 1;
-		return STATUS_FAIL;
-	}
-	j++;
-
-	bq25890_set_iinlim(0x0);
-	msleep(30);
-	bq25890_set_iinlim(0xc);
-
-	battery_log(BAT_LOG_CRTI,
-	"[charging_set_ta20_current_pattern]:err:%d chr_vol:%d bit:%d time:%3d %3d %3d %3d %3d %3d %3d %3d %3d %3d %3d!!\n",
-	errcnt, chr_vol, value,
-	cptime[1][0], cptime[2][0], cptime[3][0], cptime[4][0], cptime[5][0],
-	cptime[6][0], cptime[7][0], cptime[8][0], cptime[9][0], cptime[10][0], cptime[11][0]);
-
-	battery_log(BAT_LOG_CRTI,
-	"[charging_set_ta20_current_pattern2]:err:%d chr_vol:%d bit:%d time:%3d %3d %3d %3d %3d %3d %3d %3d %3d %3d %3d!!\n",
-	errcnt, chr_vol, value,
-	cptime[1][1], cptime[2][1], cptime[3][1], cptime[4][1], cptime[5][1],
-	cptime[6][1], cptime[7][1], cptime[8][1], cptime[9][1], cptime[10][1], cptime[11][1]);
-
-
-	bq25890_set_ico_en_start(1);
-
-//CEI comment start//
-//	bq25890_set_iinlim(0x3f);
-	bq25890_set_iinlim(0x14);
-//CEI comment end//
-
-	if (errcnt == 0)
-		return STATUS_OK;
-
-	return STATUS_FAIL;
-}
-
-
-static unsigned int charging_set_vindpm(void *data)
-{
-	unsigned int status = STATUS_OK;
-	unsigned int v = *(unsigned int *) data;
-	unsigned int vindpm = (v-2600)/100;
-
-	bq25890_set_VINDPM(vindpm);
-	battery_log(BAT_LOG_CRTI, "charging_set_vindpm:%d %d\n", v, vindpm);
-	return status;
-}
-
-static unsigned int charging_set_default_dpm(void *data)
-{
-	unsigned int status = STATUS_OK;
-	unsigned int v = *(unsigned int *) data;
-	unsigned int vindpm = (v-2600)/100;
-
-	bq25890_set_FORCE_VINDPM(1);
-	bq25890_set_VINDPM(vindpm);
-
-	battery_log(BAT_LOG_CRTI, "LE(K)=> charging_set_default_dpm:%d %d\n", v, vindpm);
-
-	return status;
-}
-
-static unsigned int charging_set_vbus_ovp_en(void *data)
-{
-	unsigned int status = STATUS_OK;
-	unsigned int e = *(unsigned int *) data;
-
-	pmic_set_register_value(MT6351_PMIC_RG_VCDT_HV_EN, e);
-
-	return status;
-}
-
-static unsigned int charging_get_bif_vbat(void *data)
-{
-	unsigned int status = STATUS_OK;
-#ifdef CONFIG_MTK_BIF_SUPPORT
-	int vbat = 0;
-
-	/* turn on VBIF28 regulator*/
-	/*bif_init();*/
-
-	/*change to HW control mode*/
-	/*pmic_set_register_value(MT6351_PMIC_RG_VBIF28_ON_CTRL, 0);
-	pmic_set_register_value(MT6351_PMIC_RG_VBIF28_EN, 1);*/
-	if (bif_checked != 1 || bif_exist == 1) {
-		bif_ADC_enable();
-
-		vbat = bif_read16(MW3790_VBAT);
-		*(unsigned int *) (data) = vbat;
-	} else {
-		*(unsigned int *) (data) = 0;
-	}
-	/*turn off LDO and change SW control back to HW control */
-	/*pmic_set_register_value(MT6351_PMIC_RG_VBIF28_EN, 0);
-	pmic_set_register_value(MT6351_PMIC_RG_VBIF28_ON_CTRL, 1);*/
-#else
-	*(unsigned int *) (data) = 0;
-#endif
-	return status;
-}
-
-static unsigned int charging_get_bif_tbat(void *data)
-{
-	unsigned int status = STATUS_OK;
-#ifdef CONFIG_MTK_BIF_SUPPORT
-	int tbat = 0;
-	int ret;
-	int tried = 0;
-
-	mdelay(50);
-
-	if (bif_exist == 1) {
-		do {
-			bif_ADC_enable();
-			ret = bif_read8(MW3790_TBAT, &tbat);
-			tried++;
-			mdelay(50);
-			if (tried > 3)
-				break;
-		} while (ret != 1);
-
-		if (tried <= 3)
-			*(int *) (data) = tbat;
-		else
-			status =  STATUS_UNSUPPORTED;
-	}
-#endif
-	return status;
-}
-
-static unsigned int charging_diso_init(void *data)
-{
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(MTK_DUAL_INPUT_CHARGER_SUPPORT)
 	struct device_node *node;
@@ -1567,9 +980,9 @@ static unsigned int charging_diso_init(void *data)
 	return status;
 }
 
-static unsigned int charging_get_diso_state(void *data)
+static int charging_get_diso_state(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 #if defined(MTK_DUAL_INPUT_CHARGER_SUPPORT)
 	int diso_state = 0x0;
@@ -1641,63 +1054,61 @@ static unsigned int charging_get_error_state(void)
 	return charging_error;
 }
 
-static unsigned int charging_set_error_state(void *data)
+static int charging_set_hiz_swchr(void *data);
+static int charging_set_error_state(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 
 	charging_error = *(unsigned int *) (data);
+	charging_set_hiz_swchr(&charging_error);
 
 	return status;
 }
 
-static unsigned int charging_set_chrind_ck_pdn(void *data)
+static int charging_set_chrind_ck_pdn(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int pwr_dn;
 
 	pwr_dn = *(unsigned int *) data;
 
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	pmic_set_register_value(PMIC_CLK_DRV_CHRIND_CK_PDN, pwr_dn);
+#else
 	pmic_set_register_value(PMIC_RG_DRV_CHRIND_CK_PDN, pwr_dn);
+#endif
 
 	return status;
 }
 
-static unsigned int charging_sw_init(void *data)
+static int charging_sw_init(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	/*put here anything needed to be init upon battery_common driver probe*/
-#ifdef CONFIG_MTK_BIF_SUPPORT
-	int vbat;
-
-	vbat = 0;
-	if (bif_checked != 1) {
-		bif_init();
-		charging_get_bif_vbat(&vbat);
-		if (vbat != 0) {
-			battery_log(BAT_LOG_CRTI, "[BIF]BIF battery detected.\n");
-			bif_exist = 1;
-		} else
-			battery_log(BAT_LOG_CRTI, "[BIF]BIF battery _NOT_ detected.\n");
-		bif_checked = 1;
-	}
-#endif
+	mtk_bif_init();
 
 	bq25890_config_interface(bq25890_CON0, 0x01, 0x01, 6);	/* enable ilimit Pin */
 	 /*DPM*/ bq25890_config_interface(bq25890_CON1, 0x6, 0xF, 0);	/* Vindpm offset  600MV */
 	bq25890_config_interface(bq25890_COND, 0x1, 0x1, 7);	/* vindpm vth 0:relative 1:absolute */
 
 	/*CC mode */
-	bq25890_config_interface(bq25890_CON4, 0x08, 0x7F, 0);	/*ICHG (0x08)512mA --> (0x20)2.048mA */
+	bq25890_config_interface(bq25890_CON4, 0x08, 0x7F, 0);	/* ICHG (0x08)512mA --> (0x20)2.048mA */
 	/*Vbus current limit */
 //CEI comment start//
 //Set IINLIM at 500mA
-	bq25890_config_interface(bq25890_CON0, 0x08, 0x3F, 0);	 /*input current limit, IINLIM, 3.25A */
+	bq25890_config_interface(bq25890_CON0, 0x08, 0x3F, 0);	/* input current limit, IINLIM, 3.25A */ //MTK ORG=0x3F
 //CEI comment end//
 
-//CEI comment start//
+
 	/* absolute VINDPM = 2.6 + code x 0.1 =4.5V;K2 24261 4.452V */
-	bq25890_config_interface(bq25890_COND, 0x12, 0x7F, 0); // Set to 4.4V
-//Check//
+//CEI comment start//
+	bq25890_config_interface(bq25890_COND, 0x12, 0x7F, 0); //MTK ORG=0x13
+//CEI comment end//
+
+	/*CV mode */
+//CEI comment start//
+//VREG jumps will cause charging full detection issue for 4.2V battery
+//JEITA enable, Alien_battery
 #if !defined(CONFIG_MTK_JEITA_STANDARD_SUPPORT)
 	if(battery_id_invalid == 0)
 		bq25890_config_interface(bq25890_CON6, 0x1D, 0x3F, 2);	/* VREG=CV 4.304V (default 4.208V) */
@@ -1706,19 +1117,59 @@ static unsigned int charging_sw_init(void *data)
 #else
 	charging_set_cv_voltage(&global_cv_voltage);
 #endif
-//CEI comment end//
+//CEI commend end//
 
-#if defined(CONFIG_MTK_PUMP_EXPRESS_PLUS_20_SUPPORT)
-	/*	upmu_set_rg_vcdt_hv_en(0);*/
-	pmic_set_register_value(MT6351_PMIC_RG_VCDT_HV_EN, 0);
+	/* upmu_set_rg_vcdt_hv_en(0); */
+
+	/* The following setting is moved from HW_INIT */
+	bq25890_config_interface(bq25890_CON2, 0x1, 0x1, 4);	/* disable ico Algorithm -->bear:en */
+	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 3);	/* disable HV DCP for gq25897 */
+	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 2);	/* disbale MaxCharge for gq25897 */
+	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 1);	/* disable DPDM detection */
+
+	bq25890_config_interface(bq25890_CON7, 0x1, 0x3, 4);	/* enable  watch dog 40 secs 0x1 */
+//CEI comment start
+//Safety_timer
+	bq25890_config_interface(bq25890_CON7, 0x0, 0x1, 3);	/* disable charging timer safety timer */ //MTK ORG=0x1
+//CEI comment end
+	bq25890_config_interface(bq25890_CON7, 0x2, 0x3, 1);	/* charging timer 12h */
+
+	bq25890_config_interface(bq25890_CON2, 0x0, 0x1, 5);	/* boost freq 1.5MHz when OTG_CONFIG=1 */
+	bq25890_config_interface(bq25890_CONA, 0x7, 0xF, 4);	/* boost voltagte 4.998V default */
+//CEI comment start//
+// Boost current
+	bq25890_config_interface(bq25890_CONA, 0x1, 0x7, 0);	/* boost current limit 0.75A */ //MTK ORG=0x3
+//CEI comment end//
+#ifdef CONFIG_MTK_BIF_SUPPORT
+	bq25890_config_interface(bq25890_CON8, 0x0, 0x7, 5);	/* disable ir_comp_resistance */
+	bq25890_config_interface(bq25890_CON8, 0x0, 0x7, 2);	/* disable ir_comp_vdamp */
+#else
+//CEI comment start//
+	bq25890_config_interface(bq25890_CON8, 0x0, 0x7, 5);	/* enable ir_comp_resistance */ //MTK ORG=0x4
+	bq25890_config_interface(bq25890_CON8, 0x0, 0x7, 2);	/* enable ir_comp_vdamp */ //MTK ORG=0x6
+//CEI comment end//
 #endif
+	bq25890_config_interface(bq25890_CON8, 0x3, 0x3, 0);	/* thermal 120 default */
+
+	bq25890_config_interface(bq25890_CON9, 0x0, 0x1, 4);	/* JEITA_VSET: VREG-200mV */
+	bq25890_config_interface(bq25890_CON7, 0x1, 0x1, 0);	/* JEITA_ISet : 20% x ICHG */
+
+	bq25890_config_interface(bq25890_CON3, 0x5, 0x7, 1);	/* System min voltage default 3.5V */
+
+	/*PreCC mode */
+	bq25890_config_interface(bq25890_CON5, 0x1, 0xF, 4);	/* precharge current default 128mA */
+	bq25890_config_interface(bq25890_CON6, 0x1, 0x1, 1);	/* precharge2cc voltage,BATLOWV, 3.0V */
+	/*CV mode */
+	bq25890_config_interface(bq25890_CON6, 0x0, 0x1, 0);	/* recharge voltage@VRECHG=CV-100MV */
+	bq25890_config_interface(bq25890_CON7, 0x1, 0x1, 7);	/* disable ICHG termination detect */
+	bq25890_config_interface(bq25890_CON5, 0x1, 0x7, 0);	/* termianation current default 128mA */
 
 	return status;
 }
 
-static unsigned int charging_enable_safetytimer(void *data)
+static int charging_enable_safetytimer(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int en;
 
 	en = *(unsigned int *) data;
@@ -1727,36 +1178,394 @@ static unsigned int charging_enable_safetytimer(void *data)
 	return status;
 }
 
-static unsigned int charging_set_hiz_swchr(void *data)
+static int charging_set_hiz_swchr(void *data)
 {
-	unsigned int status = STATUS_OK;
+	int status = STATUS_OK;
 	unsigned int en;
+	unsigned int vindpm;
 
 	en = *(unsigned int *) data;
-	bq25890_set_en_hiz(en);
+	if (en == 1)
+		vindpm = 0x7F;
+	else //CEI comment start//
+		vindpm = 0x12; //MTK ORG= 0x13
+//CEI comment end//
+
+	charging_set_vindpm(&vindpm);
+	/*bq25890_set_en_hiz(en);*/
 
 	return status;
 }
 
-static unsigned int (*const charging_func[CHARGING_CMD_NUMBER]) (void *data) = {
-charging_hw_init, charging_dump_register, charging_enable, charging_set_cv_voltage,
-	    charging_get_current, charging_set_current, charging_set_input_current,
-	    charging_get_charging_status, charging_reset_watch_dog_timer,
-	    charging_set_hv_threshold, charging_get_hv_status, charging_get_battery_status,
-	    charging_get_charger_det_status, charging_get_charger_type,
-	    charging_get_is_pcm_timer_trigger, charging_set_platform_reset,
-	    charging_get_platform_boot_mode, charging_set_power_off,
-	    charging_get_power_source, charging_get_csdac_full_flag,
-	    charging_set_ta_current_pattern, charging_set_error_state, charging_diso_init,
-	    charging_get_diso_state, charging_set_vindpm, charging_set_vbus_ovp_en,
-	    charging_get_bif_vbat, charging_set_chrind_ck_pdn, charging_sw_init, charging_enable_safetytimer,
-		charging_set_hiz_swchr, charging_get_bif_tbat, charging_set_ta20_reset,
-		charging_set_ta20_current_pattern,
+static int charging_get_is_power_path_enable(void *data);
+static int charging_set_vindpm_voltage(void *data)
+{
+	int status = STATUS_OK;
+	unsigned int vindpm;
+	unsigned int array_size;
+	bool is_power_path_enable = true;
+	int ret = 0;
+
+	array_size = GETARRAYNUM(VINDPM_REG);
+	vindpm = bmt_find_closest_level(VINDPM_REG, array_size, *(unsigned int *) data);
+	vindpm = charging_parameter_to_value(VINDPM_REG, array_size, vindpm);
+
+	/*
+	 * Since BQ25896 uses vindpm to turn off power path
+	 * If power path is disabled, do not adjust mivr
+	 */
+	ret = charging_get_is_power_path_enable(&is_power_path_enable);
+	if (ret == 0 && !is_power_path_enable) {
+		battery_log(BAT_LOG_CRTI,
+			"%s: power path is disable, skip setting vindpm = %d\n",
+			__func__, vindpm);
+		return 0;
+	}
+
+	charging_set_vindpm(&vindpm);
+	/*bq25890_set_en_hiz(en);*/
+
+	return status;
+}
+
+static int charging_set_ta20_reset(void *data)
+{
 //CEI comment start//
-		charging_set_default_dpm,
-		charging_dump_register_get_data
+	bq25890_set_vindpm(0x12); // MTK ORG= 0x13
 //CEI comment end//
-		};
+	bq25890_set_ichg(8);
+
+	bq25890_set_ico_en_start(0);
+	bq25890_set_iinlim(0x0);
+	msleep(250);
+	bq25890_set_iinlim(0xc);
+	bq25890_set_ico_en_start(1);
+	return STATUS_OK;
+}
+
+struct timespec ptime[13];
+static int cptime[13][2];
+
+static int dtime(int i)
+{
+	struct timespec time;
+
+	time = timespec_sub(ptime[i], ptime[i-1]);
+	return time.tv_nsec/1000000;
+}
+
+#define PEOFFTIME 40
+#define PEONTIME 90
+
+static int charging_set_ta20_current_pattern(void *data)
+{
+	int value;
+	int i, j = 0;
+	int flag;
+	CHR_VOLTAGE_ENUM chr_vol = *(CHR_VOLTAGE_ENUM *) data;
+
+//CEI comment start//
+	bq25890_set_vindpm(0x12); // MTK ORG= 0x13
+//CEI comment end//
+	bq25890_set_ichg(8);
+	bq25890_set_ico_en_start(0);
+
+	usleep_range(1000, 1200);
+	value = (chr_vol - CHR_VOLT_05_500000_V) / CHR_VOLT_00_500000_V;
+
+	bq25890_set_iinlim(0x0);
+	msleep(70);
+
+	get_monotonic_boottime(&ptime[j++]);
+	for (i = 4; i >= 0; i--) {
+		flag = value & (1 << i);
+
+		if (flag == 0) {
+			bq25890_set_iinlim(0xc);
+			msleep(PEOFFTIME);
+			get_monotonic_boottime(&ptime[j]);
+			cptime[j][0] = PEOFFTIME;
+			cptime[j][1] = dtime(j);
+			if (cptime[j][1] < 30 || cptime[j][1] > 65) {
+				battery_log(BAT_LOG_CRTI,
+					"charging_set_ta20_current_pattern fail1: idx:%d target:%d actual:%d\n",
+					i, PEOFFTIME, cptime[j][1]);
+				return STATUS_FAIL;
+			}
+			j++;
+			bq25890_set_iinlim(0x0);
+			msleep(PEONTIME);
+			get_monotonic_boottime(&ptime[j]);
+			cptime[j][0] = PEONTIME;
+			cptime[j][1] = dtime(j);
+			if (cptime[j][1] < 90 || cptime[j][1] > 115) {
+				battery_log(BAT_LOG_CRTI,
+					"charging_set_ta20_current_pattern fail2: idx:%d target:%d actual:%d\n",
+					i, PEOFFTIME, cptime[j][1]);
+				return STATUS_FAIL;
+			}
+			j++;
+
+		} else {
+			bq25890_set_iinlim(0xc);
+			msleep(PEONTIME);
+			get_monotonic_boottime(&ptime[j]);
+			cptime[j][0] = PEONTIME;
+			cptime[j][1] = dtime(j);
+			if (cptime[j][1] < 90 || cptime[j][1] > 115) {
+				battery_log(BAT_LOG_CRTI,
+					"charging_set_ta20_current_pattern fail3: idx:%d target:%d actual:%d\n",
+					i, PEOFFTIME, cptime[j][1]);
+				return STATUS_FAIL;
+			}
+			j++;
+			bq25890_set_iinlim(0x0);
+			msleep(PEOFFTIME);
+			get_monotonic_boottime(&ptime[j]);
+			cptime[j][0] = PEOFFTIME;
+			cptime[j][1] = dtime(j);
+			if (cptime[j][1] < 30 || cptime[j][1] > 65) {
+				battery_log(BAT_LOG_CRTI,
+					"charging_set_ta20_current_pattern fail4: idx:%d target:%d actual:%d\n",
+					i, PEOFFTIME, cptime[j][1]);
+				return STATUS_FAIL;
+			}
+			j++;
+		}
+	}
+
+	bq25890_set_iinlim(0xc);
+	msleep(160);
+	get_monotonic_boottime(&ptime[j]);
+	cptime[j][0] = 160;
+	cptime[j][1] = dtime(j);
+	if (cptime[j][1] < 150 || cptime[j][1] > 240) {
+		battery_log(BAT_LOG_CRTI,
+			"charging_set_ta20_current_pattern fail5: idx:%d target:%d actual:%d\n",
+			i, PEOFFTIME, cptime[j][1]);
+		return STATUS_FAIL;
+	}
+	j++;
+
+	bq25890_set_iinlim(0x0);
+	msleep(30);
+	bq25890_set_iinlim(0xc);
+
+	battery_log(BAT_LOG_CRTI,
+	"[charging_set_ta20_current_pattern]:chr_vol:%d bit:%d time:%3d %3d %3d %3d %3d %3d %3d %3d %3d %3d %3d!!\n",
+	chr_vol, value,
+	cptime[1][0], cptime[2][0], cptime[3][0], cptime[4][0], cptime[5][0],
+	cptime[6][0], cptime[7][0], cptime[8][0], cptime[9][0], cptime[10][0], cptime[11][0]);
+
+	battery_log(BAT_LOG_CRTI,
+	"[charging_set_ta20_current_pattern2]:chr_vol:%d bit:%d time:%3d %3d %3d %3d %3d %3d %3d %3d %3d %3d %3d!!\n",
+	chr_vol, value,
+	cptime[1][1], cptime[2][1], cptime[3][1], cptime[4][1], cptime[5][1],
+	cptime[6][1], cptime[7][1], cptime[8][1], cptime[9][1], cptime[10][1], cptime[11][1]);
+
+
+	bq25890_set_ico_en_start(1);
+	bq25890_set_iinlim(0x3f);
+
+	return STATUS_OK;
+}
+
+static int charging_set_dp(void *data)
+{
+	unsigned int status = STATUS_OK;
+
+#ifndef CONFIG_POWER_EXT
+	unsigned int en;
+
+	en = *(int *) data;
+	hw_charging_enable_dp_voltage(en);
+#endif
+
+	return status;
+}
+
+static int charging_get_charger_temperature(void *data)
+{
+	return STATUS_UNSUPPORTED;
+}
+
+static int charging_set_boost_current_limit(void *data)
+{
+	int ret = 0;
+	unsigned int current_limit = 0, reg_ilim = 0;
+
+	current_limit = *((unsigned int *)data);
+	current_limit = bmt_find_closest_level(BOOST_CURRENT_LIMIT,
+		ARRAY_SIZE(BOOST_CURRENT_LIMIT), current_limit);
+	reg_ilim = charging_parameter_to_value(BOOST_CURRENT_LIMIT,
+		ARRAY_SIZE(BOOST_CURRENT_LIMIT), current_limit);
+	bq25890_set_boost_ilim(reg_ilim);
+
+	return ret;
+}
+
+static int charging_enable_otg(void *data)
+{
+	int ret = 0;
+	unsigned int enable = 0;
+
+	enable = *((unsigned int *)data);
+	bq25890_otg_en(enable);
+
+	return ret;
+}
+
+static int charging_enable_power_path(void *data)
+{
+	int ret = 0;
+	unsigned int enable = 0;
+
+	enable = *((unsigned int *)data);
+	bq25890_set_force_vindpm(1);
+	if (enable) //CEI comment start//
+		bq25890_set_vindpm(0x12); // MTK ORG= 0x13
+//CEI comment end//
+	else
+		bq25890_set_vindpm(0x7F);
+
+	return ret;
+}
+
+static int charging_get_bif_is_exist(void *data)
+{
+	int bif_exist = 0;
+
+	bif_exist = mtk_bif_is_hw_exist();
+	*(bool *)data = bif_exist;
+
+	return 0;
+}
+
+static int charging_get_input_current(void *data)
+{
+	int ret = 0;
+
+	*((u32 *)data) = g_input_current;
+
+	return ret;
+}
+
+static int charging_enable_direct_charge(void *data)
+{
+	return -ENOTSUPP;
+}
+
+static int charging_get_is_power_path_enable(void *data)
+{
+	int ret = 0;
+	u32 reg_vindpm = 0;
+
+	reg_vindpm = bq25890_get_vindpm();
+	*((bool *)data) = (reg_vindpm == 0x7F) ? false : true;
+
+	return ret;
+}
+
+static int charging_get_is_safetytimer_enable(void *data)
+{
+	int ret = 0;
+	u32 reg_safetytimer = 0;
+
+	reg_safetytimer = bq25890_get_chg_timer_enable();
+	*((bool *)data) = (reg_safetytimer) ? true : false;
+
+	return ret;
+}
+
+static int charging_set_pwrstat_led_en(void *data)
+{
+	int ret = 0;
+	unsigned int led_en;
+
+	led_en = *(unsigned int *) data;
+
+	pmic_set_register_value(PMIC_CHRIND_MODE, 0x2); /* register mode */
+	pmic_set_register_value(PMIC_CHRIND_EN_SEL, !led_en); /* 0: Auto, 1: SW */
+	pmic_set_register_value(PMIC_CHRIND_EN, led_en);
+
+	return ret;
+}
+
+static int charging_get_ibus(void *data)
+{
+	return -ENOTSUPP;
+}
+
+static int charging_get_vbus(void *data)
+{
+	return -ENOTSUPP;
+}
+
+static int charging_reset_dc_watch_dog_timer(void *data)
+{
+	return -ENOTSUPP;
+}
+
+static int charging_run_aicl(void *data)
+{
+	return -ENOTSUPP;
+}
+
+static int charging_set_ircmp_resistor(void *data)
+{
+	u32 resistor = 0;
+	u8 reg_resistor = 0;
+
+	resistor = *((unsigned int *)data);
+	resistor = bmt_find_closest_level(IRCMP_RESISTOR,
+		ARRAY_SIZE(IRCMP_RESISTOR), resistor);
+	reg_resistor = charging_parameter_to_value(IRCMP_RESISTOR,
+		ARRAY_SIZE(IRCMP_RESISTOR), resistor);
+	bq25890_set_VBAT_IR_compensation(reg_resistor);
+
+	return 0;
+}
+
+static int charging_set_ircmp_volt_clamp(void *data)
+{
+	u32 volt_clamp = 0;
+	u8 reg_volt_clamp = 0;
+
+	volt_clamp = *((unsigned int *)data);
+	volt_clamp = bmt_find_closest_level(IRCMP_VOLT_CLAMP,
+		ARRAY_SIZE(IRCMP_VOLT_CLAMP), volt_clamp);
+	reg_volt_clamp = charging_parameter_to_value(IRCMP_VOLT_CLAMP,
+		ARRAY_SIZE(IRCMP_VOLT_CLAMP), volt_clamp);
+	bq25890_set_VBAT_clamp(reg_volt_clamp);
+
+	return 0;
+}
+
+static int (*const charging_func[CHARGING_CMD_NUMBER]) (void *data) = {
+	charging_hw_init, charging_dump_register, charging_enable, charging_set_cv_voltage,
+	charging_get_current, charging_set_current, charging_set_input_current,
+	charging_get_charging_status, charging_reset_watch_dog_timer,
+	charging_set_hv_threshold, charging_get_hv_status, charging_get_battery_status,
+	charging_get_charger_det_status, charging_get_charger_type,
+	charging_get_is_pcm_timer_trigger, charging_set_platform_reset,
+	charging_get_platform_boot_mode, charging_set_power_off,
+	charging_get_power_source, charging_get_csdac_full_flag,
+	charging_set_ta_current_pattern, charging_set_error_state, charging_diso_init,
+	charging_get_diso_state, charging_set_vindpm_voltage, charging_set_vbus_ovp_en,
+	charging_get_bif_vbat, charging_set_chrind_ck_pdn, charging_sw_init, charging_enable_safetytimer,
+	charging_set_hiz_swchr, charging_get_bif_tbat, charging_set_ta20_reset,
+	charging_set_ta20_current_pattern, charging_set_dp, charging_get_charger_temperature,
+	charging_set_boost_current_limit, charging_enable_otg, charging_enable_power_path,
+	charging_get_bif_is_exist, charging_get_input_current, charging_enable_direct_charge,
+	charging_get_is_power_path_enable, charging_get_is_safetytimer_enable,
+	charging_set_pwrstat_led_en, charging_get_ibus, charging_get_vbus,
+	charging_reset_dc_watch_dog_timer, charging_run_aicl, charging_set_ircmp_resistor,
+	charging_set_ircmp_volt_clamp,
+//CEI comment start//
+	charging_set_default_dpm,
+	charging_dump_register_get_data
+//CEI comment end//
+};
 
 /*
 * FUNCTION
@@ -1776,9 +1585,9 @@ charging_hw_init, charging_dump_register, charging_enable, charging_set_cv_volta
 * GLOBALS AFFECTED
 *       None
 */
-signed int chr_control_interface(CHARGING_CTRL_CMD cmd, void *data)
+int chr_control_interface(CHARGING_CTRL_CMD cmd, void *data)
 {
-	signed int status;
+	int status;
 
 	if (cmd < CHARGING_CMD_NUMBER) {
 		if (charging_func[cmd] != NULL)

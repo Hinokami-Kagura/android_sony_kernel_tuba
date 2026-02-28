@@ -92,19 +92,38 @@ void mt_pwm_power_on_hal(u32 pwm_no, bool pmic_pad, unsigned long *power_flag)
 {
 	int clk_en_ret;
 
-	pr_debug("[PWM][CCF]enable clk_pwm_main:%p\n", pwm_clk[pwm_no]);
-	clk_en_ret = clk_prepare_enable(pwm_clk[pwm_no]);
-	if (clk_en_ret) {
-		pr_err("[PWM][CCF]enable clk_pwm_main failed. ret:%d, clk_pwm_main:%p\n",
-		       clk_en_ret, pwm_clk[pwm_no]);
+	if (0 == (*power_flag)) {
+		pr_debug("[PWM][CCF]enable clk_pwm_main:%p\n", pwm_clk[PWM_CLK]);
+		clk_en_ret = clk_prepare_enable(pwm_clk[PWM_CLK]);
+		pr_debug("[PWM][CCF]enable clk_pwm_hclk:%p\n", pwm_clk[PWM_HCLK_CLK]);
+		clk_en_ret = clk_prepare_enable(pwm_clk[PWM_HCLK_CLK]);
+		set_bit(PWM_CLK_NUM, power_flag);
 	}
-
+	if (!test_bit(pwm_no, power_flag)) {
+		pr_debug("[PWM][CCF]enable clk_pwm_num:%p\n", pwm_clk[pwm_no]);
+		clk_en_ret = clk_prepare_enable(pwm_clk[pwm_no]);
+		if (clk_en_ret) {
+			pr_err("[PWM][CCF]enable clk_pwm_num failed. ret:%d, clk_pwm_num:%p\n",
+				clk_en_ret, pwm_clk[pwm_no]);
+		}
+		set_bit(pwm_no, power_flag);
+	}
 }
 
 void mt_pwm_power_off_hal(u32 pwm_no, bool pmic_pad, unsigned long *power_flag)
 {
-	pr_debug("[PWM][CCF]disable clk_pwm_main:%p\n", pwm_clk[pwm_no]);
-	clk_disable_unprepare(pwm_clk[pwm_no]);
+	if (test_bit(pwm_no, power_flag)) {
+		pr_debug("[PWM][CCF]disable clk_pwm_num:%p\n", pwm_clk[pwm_no]);
+		clk_disable_unprepare(pwm_clk[pwm_no]);
+		clear_bit(pwm_no, power_flag);
+	}
+	if (BIT(PWM_CLK_NUM) == (*power_flag)) {
+		pr_debug("[PWM][CCF]disable clk_pwm_hclk:%p\n", pwm_clk[PWM_HCLK_CLK]);
+		clk_disable_unprepare(pwm_clk[PWM_HCLK_CLK]);
+		pr_debug("[PWM][CCF]disable clk_pwm_main:%p\n", pwm_clk[PWM_CLK]);
+		clk_disable_unprepare(pwm_clk[PWM_CLK]);
+		clear_bit(PWM_CLK_NUM, power_flag);
+	}
 }
 
 #else
@@ -412,13 +431,16 @@ void mt_set_intr_ack_hal(u32 pwm_intr_ack_bit)
 	SETREG32(PWM_INT_ACK, 1 << pwm_intr_ack_bit);
 }
 
-void mt_set_pwm_buf0_addr_hal(u32 pwm_no, u32 *addr)
+void mt_set_pwm_buf0_addr_hal(u32 pwm_no, dma_addr_t addr)
 {
 	unsigned long reg_buff0_addr;
 
+	/*pr_debug("[PWM]buf0 addr:%p\n", addr);*/
+
 	reg_buff0_addr = PWM_register[pwm_no] + 4 * PWM_BUF0_BASE_ADDR;
 	/*OUTREG32(reg_buff0_addr, addr);*/
-	OUTREG32_DMA(reg_buff0_addr, addr);
+	/*OUTREG32_DMA(reg_buff0_addr, addr);*/
+	OUTREG32(reg_buff0_addr, (dma_addr_t)addr);
 }
 
 void mt_set_pwm_buf0_size_hal(u32 pwm_no, uint16_t size)

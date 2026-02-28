@@ -1,9 +1,18 @@
 /*
- * drivers/leds/leds-mt65xx.c
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file COPYING in the main directory of this archive for
- * more details.
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
+/*
+ * drivers/leds/leds-mt65xx.c
  *
  * mt65xx leds driver
  *
@@ -37,7 +46,6 @@
 #include <leds_hal.h>
 #include "leds_drv.h"
 #include <mt-plat/mt_pwm.h>
-#include <mt-plat/upmu_common.h>
 
 #ifdef CONFIG_BACKLIGHT_SUPPORT_LP8557
 #include <linux/of_gpio.h>
@@ -251,38 +259,41 @@ static int mt65xx_led_set_cust(struct cust_mt65xx_led *cust, int level)
 static void mt65xx_led_set(struct led_classdev *led_cdev,
 			   enum led_brightness level)
 {
-    struct mt65xx_led_data *led_data =
-    container_of(led_cdev, struct mt65xx_led_data, cdev);
+	struct mt65xx_led_data *led_data =
+	    container_of(led_cdev, struct mt65xx_led_data, cdev);
 #ifdef CONFIG_BACKLIGHT_SUPPORT_LP8557
-    bool flag = FALSE;
-    int value = 0;
-    int retval;
-    struct device_node *node = NULL;
-    struct i2c_client *client = g_client;
-    value = i2c_smbus_read_byte_data(g_client, 0x10);
-    LEDS_DRV_DEBUG("LEDS:mt65xx_led_set:0x10 = %d\n", value);
+	bool flag = FALSE;
+	int value = 0;
+	int retval;
+	struct device_node *node = NULL;
+	struct i2c_client *client = g_client;
+	value = i2c_smbus_read_byte_data(g_client, 0x10);
+	LEDS_DRV_DEBUG("LEDS:mt65xx_led_set:0x10 = %d\n", value);
 
-    node = of_find_compatible_node(NULL, NULL, "mediatek,lcd-backlight");
-    if (node) {
-        I2C_SET_FOR_BACKLIGHT = of_get_named_gpio(node, "gpios", 0);
-        LEDS_DRV_DEBUG("Led_i2c gpio num for power:%d\n", I2C_SET_FOR_BACKLIGHT);
-    }
+	node = of_find_compatible_node(NULL, NULL,
+						    "mediatek,lcd-backlight");
+	if (node) {
+		I2C_SET_FOR_BACKLIGHT = of_get_named_gpio(node, "gpios", 0);
+		LEDS_DRV_DEBUG("Led_i2c gpio num for power:%d\n", I2C_SET_FOR_BACKLIGHT);
+	}
 #endif
-    if (strcmp(led_data->cust.name, "lcd-backlight") == 0) {
+	if (strcmp(led_data->cust.name, "lcd-backlight") == 0) {
 #ifdef CONTROL_BL_TEMPERATURE
-        mutex_lock(&bl_level_limit_mutex);
-        current_level = level;
-        /* LEDS_DRV_DEBUG("brightness_set_cust:current_level=%d\n", current_level); */
-        if (0 == limit_flag) {
-            last_level = level;
-        /* LEDS_DRV_DEBUG("brightness_set_cust:last_level=%d\n", last_level); */
-        } else {
-            if (limit < current_level) {
-                level = limit;
-                LEDS_DRV_DEBUG("backlight_set_cust: control level=%d\n", level);
-            }
-        }
-        mutex_unlock(&bl_level_limit_mutex);
+		mutex_lock(&bl_level_limit_mutex);
+		current_level = level;
+		/* LEDS_DRV_DEBUG("brightness_set_cust:current_level=%d\n", current_level); */
+		if (0 == limit_flag) {
+			last_level = level;
+			/* LEDS_DRV_DEBUG("brightness_set_cust:last_level=%d\n", last_level); */
+		} else {
+			if (limit < current_level) {
+				level = limit;
+				LEDS_DRV_DEBUG
+				    ("backlight_set_cust: control level=%d\n",
+				     level);
+			}
+		}
+		mutex_unlock(&bl_level_limit_mutex);
 #endif
     //CEI comments start
     
@@ -306,36 +317,36 @@ static void mt65xx_led_set(struct led_classdev *led_cdev,
     }
     //CEI comments end
 #ifdef CONFIG_BACKLIGHT_SUPPORT_LP8557
-    retval = gpio_request(I2C_SET_FOR_BACKLIGHT, "i2c_set_for_backlight");
-    if (retval)
-        LEDS_DRV_DEBUG("LEDS: request I2C gpio149 failed\n");
+	retval = gpio_request(I2C_SET_FOR_BACKLIGHT, "i2c_set_for_backlight");
+	if (retval)
+		LEDS_DRV_DEBUG("LEDS: request I2C gpio149 failed\n");
 
-    if (strcmp(led_data->cust.name, "lcd-backlight") == 0) {
-        if (level == 0) {
-            LEDS_DRV_DEBUG("LEDS:mt65xx_led_set:close the power\n");
-            i2c_smbus_write_byte_data(client, 0x00, 0);
-            gpio_direction_output(I2C_SET_FOR_BACKLIGHT, 0);
-        }
-        if (!last_level1 && level) {
-            LEDS_DRV_DEBUG("LEDS:mt65xx_led_set:open the power\n");
-            gpio_direction_output(I2C_SET_FOR_BACKLIGHT, 1);
-            mdelay(100);
-            i2c_smbus_write_byte_data(client, 0x10, 4);
-            flag = TRUE;
-        }
-        last_level1 = level;
-    }
-    gpio_free(I2C_SET_FOR_BACKLIGHT);
+	if (strcmp(led_data->cust.name, "lcd-backlight") == 0) {
+		if (level == 0) {
+			LEDS_DRV_DEBUG("LEDS:mt65xx_led_set:close the power\n");
+			i2c_smbus_write_byte_data(client, 0x00, 0);
+			gpio_direction_output(I2C_SET_FOR_BACKLIGHT, 0);
+		}
+		if (!last_level1 && level) {
+			LEDS_DRV_DEBUG("LEDS:mt65xx_led_set:open the power\n");
+			gpio_direction_output(I2C_SET_FOR_BACKLIGHT, 1);
+			mdelay(100);
+			i2c_smbus_write_byte_data(client, 0x10, 4);
+			flag = TRUE;
+		}
+		last_level1 = level;
+	}
+	gpio_free(I2C_SET_FOR_BACKLIGHT);
 #endif
-    mt_mt65xx_led_set(led_cdev, level);
+	mt_mt65xx_led_set(led_cdev, level);
 #ifdef CONFIG_BACKLIGHT_SUPPORT_LP8557
-    if (strcmp(led_data->cust.name, "lcd-backlight") == 0) {
-        if (flag) {
-            i2c_smbus_write_byte_data(client, 0x14, 0xdf);
-            i2c_smbus_write_byte_data(client, 0x04, 0xff);
-            i2c_smbus_write_byte_data(client, 0x00, 1);
-        }
-    }
+	if (strcmp(led_data->cust.name, "lcd-backlight") == 0) {
+		if (flag) {
+			i2c_smbus_write_byte_data(client, 0x14, 0xdf);
+			i2c_smbus_write_byte_data(client, 0x04, 0xff);
+			i2c_smbus_write_byte_data(client, 0x00, 1);
+		}
+	}
 #endif
 }
 
@@ -888,62 +899,67 @@ static int mt65xx_leds_probe(struct platform_device *pdev)
 	LEDS_DRV_DEBUG("%s\n", __func__);
 	get_div_array();
 	for (i = 0; i < MT65XX_LED_TYPE_TOTAL; i++) {
-	    if (cust_led_list[i].mode == MT65XX_LED_MODE_NONE) {
-		g_leds_data[i] = NULL;
-		continue;
-	    }
+		if (cust_led_list[i].mode == MT65XX_LED_MODE_NONE) {
+			g_leds_data[i] = NULL;
+			continue;
+		}
 
-	    g_leds_data[i] =
+		g_leds_data[i] =
 		    kzalloc(sizeof(struct mt65xx_led_data), GFP_KERNEL);
-	    if (!g_leds_data[i]) {
-		ret = -ENOMEM;
-		goto err;
-	    }
+		if (!g_leds_data[i]) {
+			ret = -ENOMEM;
+			goto err;
+		}
 
-	    g_leds_data[i]->cust.mode = cust_led_list[i].mode;
-	    g_leds_data[i]->cust.data = cust_led_list[i].data;
-	    g_leds_data[i]->cust.name = cust_led_list[i].name;
+		g_leds_data[i]->cust.mode = cust_led_list[i].mode;
+		g_leds_data[i]->cust.data = cust_led_list[i].data;
+		g_leds_data[i]->cust.name = cust_led_list[i].name;
 
-	    g_leds_data[i]->cdev.name = cust_led_list[i].name;
-	    g_leds_data[i]->cust.config_data = cust_led_list[i].config_data;	/* bei add */
+		g_leds_data[i]->cdev.name = cust_led_list[i].name;
+		g_leds_data[i]->cust.config_data = cust_led_list[i].config_data;	/* bei add */
 
 	    g_leds_data[i]->cdev.brightness_set = mt65xx_led_set;
 	    g_leds_data[i]->cdev.blink_set = mt65xx_blink_set;
             //CEI comments start
             
-	    //INIT_WORK(&g_leds_data[i]->work, mt_mt65xx_led_work);
+	    	  //INIT_WORK(&g_leds_data[i]->work, mt_mt65xx_led_work);
             //CEI comments end
 
-	    ret = led_classdev_register(&pdev->dev, &g_leds_data[i]->cdev);
-	    #if 0
-	    if (strcmp(g_leds_data[i]->cdev.name, "lcd-backlight") == 0) {
-		rc = device_create_file(g_leds_data[i]->cdev.dev,
+
+		ret = led_classdev_register(&pdev->dev, &g_leds_data[i]->cdev);
+		#if 0
+		if (strcmp(g_leds_data[i]->cdev.name, "lcd-backlight") == 0) {
+			rc = device_create_file(g_leds_data[i]->cdev.dev,
 						&dev_attr_duty);
-		if (rc) {
-		    LEDS_DRV_DEBUG ("device_create_file duty fail!\n");
-		}
+			if (rc) {
+				LEDS_DRV_DEBUG
+				    ("device_create_file duty fail!\n");
+			}
 
-		rc = device_create_file(g_leds_data[i]->cdev.dev,
+			rc = device_create_file(g_leds_data[i]->cdev.dev,
 						&dev_attr_div);
-		if (rc) {
-		    LEDS_DRV_DEBUG("device_create_file duty fail!\n");
-		}
+			if (rc) {
+				LEDS_DRV_DEBUG
+				    ("device_create_file duty fail!\n");
+			}
 
-		rc = device_create_file(g_leds_data[i]->cdev.dev,
+			rc = device_create_file(g_leds_data[i]->cdev.dev,
 						&dev_attr_frequency);
-		if (rc) {
-		    LEDS_DRV_DEBUG("device_create_file duty fail!\n");
-		}
+			if (rc) {
+				LEDS_DRV_DEBUG
+				    ("device_create_file duty fail!\n");
+			}
 
-		rc = device_create_file(g_leds_data[i]->cdev.dev,
+			rc = device_create_file(g_leds_data[i]->cdev.dev,
 						&dev_attr_pwm_register);
-		if (rc) {
-		    LEDS_DRV_DEBUG("device_create_file duty fail!\n");
+			if (rc) {
+				LEDS_DRV_DEBUG
+				    ("device_create_file duty fail!\n");
+			}
+			bl_setting = &g_leds_data[i]->cust;
 		}
-		bl_setting = &g_leds_data[i]->cust;
-	    }
-	    #endif
-            //CEI comments start
+		#endif
+          //CEI comments start
 	    
             if (strcmp(g_leds_data[i]->cdev.name,"red") == 0) {
 	        ret = device_create_file(g_leds_data[i]->cdev.dev, &dev_attr_blink);
@@ -1003,8 +1019,8 @@ static int mt65xx_leds_probe(struct platform_device *pdev)
 	            goto err;
             }
             //CEI comments end
-	    if (ret)
-		goto err;
+		if (ret)
+			goto err;
 
 	}
 #ifdef CONTROL_BL_TEMPERATURE

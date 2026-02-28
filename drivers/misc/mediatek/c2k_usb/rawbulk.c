@@ -185,6 +185,7 @@ static inline void add_device_attr(struct rawbulk_function *fn, int n, const cha
 				   *name, int mode)
 {
 	if (n < MAX_ATTRIBUTES) {
+		sysfs_attr_init(&fn->attr[n].attr);
 		fn->attr[n].attr.name = name;
 		fn->attr[n].attr.mode = mode;
 		fn->attr[n].show = rawbulk_attr_show;
@@ -210,7 +211,7 @@ static ssize_t rawbulk_attr_show(struct device *dev, struct device_attribute *at
 	int idx;
 	int enab;
 	struct rawbulk_function *fn;
-	ssize_t count;
+	ssize_t count = 0;
 
 	for (n = 0; n < _MAX_TID; n++) {
 		fn = rawbulk_lookup_function(n);
@@ -264,7 +265,7 @@ static ssize_t rawbulk_attr_show(struct device *dev, struct device_attribute *at
 	default:
 		break;
 	}
-	return 0;
+	return count;
 }
 
 #ifdef C2K_USB_UT
@@ -339,11 +340,13 @@ static ssize_t rawbulk_attr_store(struct device *dev, struct device_attribute *a
 	if (idx == ATTR_ENABLE) {
 #endif
 		int enable;
+		long tmp;
 
 		if (idx == ATTR_ENABLE) {
 			int ret;
 
-			ret = kstrtol(buf, 0, (long *)&enable);
+			ret = kstrtol(buf, 0, &tmp);
+			enable = (int)tmp;
 			C2K_NOTE("enable:%d\n", enable);
 
 #ifdef C2K_USB_UT
@@ -453,20 +456,26 @@ static ssize_t rawbulk_attr_store(struct device *dev, struct device_attribute *a
 		if (fn->transfer_id == RAWBULK_TID_MODEM) {
 			if (check_enable_state(fn)) {
 				int val, ret;
+				long tmp;
 
-				ret = kstrtol(buf, 0, (long *)&val);
+				ret = kstrtol(buf, 0, &tmp);
+				val = (int)tmp;
 				modem_dtr_set(val, 1);
 			}
 		}
 	} else if (idx == ATTR_AUTORECONN) {
 		int val, ret;
+		long tmp;
 
-		ret = kstrtol(buf, 0, (long *)&val);
+		ret = kstrtol(buf, 0, &tmp);
+		val = (int)tmp;
 		fn->autoreconn = !!val;
 	} else {
 		int val, ret;
+		long tmp;
 
-		ret = kstrtol(buf, 0, (long *)&val);
+		ret = kstrtol(buf, 0, &tmp);
+		val = (int)tmp;
 		switch (idx) {
 		case ATTR_NUPS:
 			nups = val;

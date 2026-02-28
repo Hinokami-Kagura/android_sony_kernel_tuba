@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <asm/page.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
@@ -9,8 +22,6 @@
 #include <linux/vmalloc.h>
 #include "ion_priv.h"
 #include <linux/slab.h>
-#include <linux/xlog.h>
-#include <m4u.h>
 #include <linux/mutex.h>
 #include <mmprofile.h>
 #include <linux/debugfs.h>
@@ -192,7 +203,7 @@ static void history_seq_stop(struct seq_file *p, void *v)
 {
 }
 
-static struct const seq_operations seq_op = {
+static const struct seq_operations seq_op = {
 				.start = history_seq_start,
 				.next = history_seq_next,
 				.stop = history_seq_stop,
@@ -305,6 +316,7 @@ void history_record_destroy(struct history_record *history_record)
 				break;
 			}
 		}
+		spin_unlock(&history_record->lock);
 	} while (busy);
 	/* we have history_record->lock locked here */
 
@@ -548,6 +560,8 @@ static int ion_history_reocrd(void *data)
 {
 	struct ion_device *dev = g_ion_device;
 	struct rb_node *n;
+	size_t old_total_size = 0;
+	size_t total_size = 0;
 
 	while (1) {
 		if (kthread_should_stop()) {
@@ -561,6 +575,38 @@ static int ion_history_reocrd(void *data)
 			IONMSG("ion history thread being killed\n");
 			break;
 		}
+		if (g_client_history || g_buffer_history) {
+			size_t total_orphaned_size = 0;
+
+			total_size = 0;
+			mutex_lock(&dev->buffer_lock);
+			for (n = rb_first(&dev->buffers); n; n = rb_next(n)) {
+				struct ion_buffer
+				*buffer = rb_entry(n, struct ion_buffer,
+						node);
+				total_size += buffer->size;
+				if (!buffer->handle_count)
+					total_orphaned_size += buffer->size;
+			}
+			mutex_unlock(&dev->buffer_lock);
+
+			if (old_total_size == total_size)
+				continue;
+
+			if (g_client_history) {
+				/* record page pool info */
+				ion_mm_heap_for_each_pool(write_mm_page_pool);
+
+				if (total_orphaned_size)
+					ion_client_write_record(g_client_history, NULL, NULL,
+								total_orphaned_size, CLIENT_ADDRESS_ORPHAN);
+				/* total size with time stamp */
+				ion_client_write_record(g_client_history, NULL, NULL,
+							total_size, CLIENT_ADDRESS_TOTAL);
+			}
+		}
+
+		old_total_size = total_size;
 
 		/* == client == */
 		if (g_client_history) {
@@ -594,34 +640,6 @@ static int ion_history_reocrd(void *data)
 			up_read(&dev->lock);
 		}
 
-		if (g_client_history || g_buffer_history) {
-			size_t total_size = 0;
-			size_t total_orphaned_size = 0;
-
-			mutex_lock(&dev->buffer_lock);
-			for (n = rb_first(&dev->buffers); n; n = rb_next(n)) {
-				struct ion_buffer
-				*buffer = rb_entry(n, struct ion_buffer,
-						node);
-				total_size += buffer->size;
-				if (!buffer->handle_count)
-					total_orphaned_size += buffer->size;
-			}
-			mutex_unlock(&dev->buffer_lock);
-
-			if (g_client_history) {
-				/* record page pool info */
-				ion_mm_heap_for_each_pool(write_mm_page_pool);
-
-				if (total_orphaned_size)
-					ion_client_write_record(g_client_history, NULL, NULL,
-							total_orphaned_size, CLIENT_ADDRESS_ORPHAN);
-				/* total size with time stamp */
-				ion_client_write_record(g_client_history, NULL, NULL,
-						total_size, CLIENT_ADDRESS_TOTAL);
-			}
-		}
-
 	}
 
 	return 0;
@@ -641,7 +659,7 @@ int ion_history_init(void)
 		return (long) g_client_history;
 	}
 
-	debugfs_create_file("string_hash", 644, g_ion_device->debug_root, NULL,
+	debugfs_create_file("string_hash", 0644, g_ion_device->debug_root, NULL,
 			&string_hash_debug_fops);
 
 	ion_history_kthread = kthread_run(ion_history_reocrd, NULL, "%s",

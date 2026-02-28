@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 
 #ifndef __PEDOMETER_V1_H__
 #define __PEDOMETER_V1_H__
@@ -39,11 +52,13 @@
 
 #define PEDO_INVALID_VALUE -1
 
-#define EVENT_TYPE_PEDO_LENGTH		ABS_X
-#define EVENT_TYPE_PEDO_FREQUENCY		ABS_Y
-#define EVENT_TYPE_PEDO_COUNT		ABS_Z
-#define EVENT_TYPE_PEDO_DISTANCE		ABS_RX
+#define EVENT_TYPE_PEDO_LENGTH			REL_X
+#define EVENT_TYPE_PEDO_FREQUENCY		REL_Y
+#define EVENT_TYPE_PEDO_COUNT			REL_Z
+#define EVENT_TYPE_PEDO_DISTANCE		REL_RX
 #define EVENT_TYPE_PEDO_STATUS			ABS_WHEEL
+#define EVENT_TYPE_PEDO_TIMESTAMP_HI		REL_HWHEEL
+#define EVENT_TYPE_PEDO_TIMESTAMP_LO		REL_DIAL
 
 
 #define PEDO_VALUE_MAX (32767)
@@ -71,7 +86,7 @@ typedef struct {
 } pedometer_t;
 
 struct pedo_data_path {
-	int (*get_data)(u32 *value, int *status);
+	int (*get_data)(struct hwm_sensor_data *pedo_data, int *status);
 	int vender_div;
 };
 

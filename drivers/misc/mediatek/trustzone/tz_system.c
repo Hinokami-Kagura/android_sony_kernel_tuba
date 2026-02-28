@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 
 #include <linux/module.h>
 #include <linux/types.h>
@@ -12,6 +25,8 @@
 #include "trustzone/kree/system.h"
 #include "kree_int.h"
 #include "sys_ipc.h"
+#include "kree/mem.h"
+
 #include "kree/tz_trusty.h"
 
 #include <linux/trusty/trusty_ipc.h>
@@ -57,6 +72,10 @@ static const KREE_REE_Service_Func ree_service_funcs[] = {
 	KREE_ServThread_Create,
 
 	KREE_ServSemaphoreDownInterruptible,
+#ifdef CONFIG_MTEE_CMA_SECURE_MEMORY
+	KREE_ServGetChunkmemPool,
+	KREE_ServReleaseChunkmemPool,
+#endif
 };
 
 #define ree_service_funcs_num \
@@ -341,8 +360,12 @@ TZ_RESULT KREE_TeeServiceCall(KREE_SESSION_HANDLE handle, uint32_t command,
 		switch (type) {
 		case TZPT_VALUE_INPUT:
 		case TZPT_VALUE_INOUT:
-		case TZPT_VALUE_OUTPUT:
 			param[i] = oparam[i];
+			break;
+		case TZPT_VALUE_OUTPUT:
+			/* reset to zero if output */
+			param[i].value.a = 0;
+			param[i].value.b = 0;
 			break;
 
 		case TZPT_MEM_INPUT:
@@ -366,9 +389,10 @@ TZ_RESULT KREE_TeeServiceCall(KREE_SESSION_HANDLE handle, uint32_t command,
 					goto error;
 				}
 
-				memcpy(param[i].mem.buffer,
-					oparam[i].mem.buffer,
-					param[i].mem.size);
+				if (TZPT_MEM_OUTPUT != type)
+					memcpy(param[i].mem.buffer,
+						oparam[i].mem.buffer,
+						param[i].mem.size);
 			}
 			break;
 
@@ -505,6 +529,7 @@ static TZ_RESULT tz_ree_service(u32 op, u8 param[REE_SERVICE_BUFFER_SIZE])
 
 	return (func) (op, param);
 }
+
 #endif /* ~CONFIG_TRUSTY */
 
 TZ_RESULT KREE_InitTZ(void)

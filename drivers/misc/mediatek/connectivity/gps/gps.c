@@ -67,7 +67,7 @@
 #define PFX "GPS: "
 #else
 #define GPS_DBG_NONE(fmt, arg...)    do {} while (0)
-#define GPS_DBG pr_debug
+#define GPS_DBG GPS_DBG_NONE
 #define GPS_TRC GPS_DBG_NONE
 #define GPS_VER pr_debug
 #define GPS_ERR pr_err
@@ -851,7 +851,7 @@ static ssize_t mt3326_gps_write(struct file *file, const char __user *buf, size_
 {
 	struct gps_data *dev = file->private_data;
 	ssize_t ret = 0;
-        size_t copy_size = 0;
+	int copy_size = 0;
 
 	GPS_TRC();
 
@@ -867,8 +867,7 @@ static ssize_t mt3326_gps_write(struct file *file, const char __user *buf, size_
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
 
-	//if (copy_from_user(dev->dat_buf, buf, count)) {
-        copy_size = min(count, sizeof(dev->dat_buf));
+	copy_size = (count < 4096) ? count : 4096;
 	if (copy_from_user(dev->dat_buf, buf, copy_size)) {
 		GPS_DBG("copy_from_user error");
 		ret = -EFAULT;

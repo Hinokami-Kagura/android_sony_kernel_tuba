@@ -44,6 +44,9 @@
     doing the mount will be allowed to access the filesystem */
 #define FUSE_ALLOW_OTHER         (1 << 1)
 
+/** [CEI][SM10N][SD] DMS10895023 geotag issue ,fixed by DMS01421006 */
+#define FUSE_ALLOW_UTIME_GRP     (1 << 2)
+
 /** Number of page pointers embedded in fuse_req */
 #define FUSE_REQ_INLINE_PAGES 1
 
@@ -157,7 +160,8 @@ struct fuse_file {
 
 	/** Has flock been performed on this file? */
 	bool flock:1;
-
+	
+	/* [CEI comment] fuse: Add support for passthrough read/write */ 
 	/* the read write file */
 	struct file *passthrough_filp;
 	bool passthrough_enabled;
@@ -219,6 +223,7 @@ struct fuse_out {
 	/** Array of arguments */
 	struct fuse_arg args[3];
 
+	/* [CEI comment] fuse: Add support for passthrough read/write */
 	struct file *passthrough_filp;
 };
 
@@ -357,6 +362,9 @@ struct fuse_req {
 	/** Inode used in the request or NULL */
 	struct inode *inode;
 
+	/** Path used for completing d_canonical_path */
+	struct path *canonical_path;
+
 	/** AIO control block */
 	struct fuse_io_priv *io;
 
@@ -369,6 +377,7 @@ struct fuse_req {
 	/** Request is stolen from fuse_file->reserved_req */
 	struct file *stolen_file;
 
+	/* [CEI comment] fuse: Add support for passthrough read/write */
 	/** fuse passthrough file  */
 	struct file *passthrough_filp;
 };
@@ -492,6 +501,7 @@ struct fuse_conn {
 	/** write-back cache policy (default is write-through) */
 	unsigned writeback_cache:1;
 
+	/* [CEI comment] fuse: Add support for passthrough read/write */
 	/** passthrough IO. */
 	unsigned passthrough:1;
 

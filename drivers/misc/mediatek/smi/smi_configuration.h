@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _SMI_CONFIGURATION_H_
 #define _SMI_CONFIGURATION_H_
 
@@ -5,13 +18,41 @@
 #include "mt_smi.h"
 
 /* SMI common configuration */
-#if defined(SMI_D1) || defined(SMI_D3) || defined(SMI_J)
+#if defined(SMI_D1)
 	#define SMI_PARAM_BW_OPTIMIZATION (1)
-	#define SMI_PARAM_BUS_OPTIMIZATION (0xFF)
+	#define SMI_PARAM_BUS_OPTIMIZATION (0xF)
 	#define SMI_PARAM_ENABLE_IOCTL (1)
 	#define SMI_PARAM_DISABLE_FREQ_HOPPING (0)
 	#define SMI_PARAM_DISABLE_FREQ_MUX (1)
 	#define SMI_PARAM_DISABLE_MMDVFS (0)
+#elif defined(SMI_D3)
+	#define SMI_PARAM_BW_OPTIMIZATION (1)
+	#define SMI_PARAM_BUS_OPTIMIZATION (0xF)
+	#define SMI_PARAM_ENABLE_IOCTL (1)
+	#define SMI_PARAM_DISABLE_FREQ_HOPPING (0)
+	#define SMI_PARAM_DISABLE_FREQ_MUX (1)
+	#define SMI_PARAM_DISABLE_MMDVFS (0)
+#elif defined(SMI_J)
+	#define SMI_PARAM_BW_OPTIMIZATION (1)
+	#define SMI_PARAM_BUS_OPTIMIZATION (0xF)
+	#define SMI_PARAM_ENABLE_IOCTL (1)
+	#define SMI_PARAM_DISABLE_FREQ_HOPPING (0)
+	#define SMI_PARAM_DISABLE_FREQ_MUX (1)
+	#define SMI_PARAM_DISABLE_MMDVFS (0)
+#elif defined(SMI_D2)
+	#define SMI_PARAM_BW_OPTIMIZATION (1)
+	#define SMI_PARAM_BUS_OPTIMIZATION (0x7)
+	#define SMI_PARAM_ENABLE_IOCTL (1)
+	#define SMI_PARAM_DISABLE_FREQ_HOPPING (0)
+	#define SMI_PARAM_DISABLE_FREQ_MUX (1)
+	#define SMI_PARAM_DISABLE_MMDVFS (0)
+#elif defined(SMI_R)
+	#define SMI_PARAM_BW_OPTIMIZATION (1)
+	#define SMI_PARAM_BUS_OPTIMIZATION (0x3)
+	#define SMI_PARAM_ENABLE_IOCTL (1)
+	#define SMI_PARAM_DISABLE_FREQ_HOPPING (1)
+	#define SMI_PARAM_DISABLE_FREQ_MUX (1)
+	#define SMI_PARAM_DISABLE_MMDVFS (1)
 #elif defined(SMI_EV)
 	#define SMI_PARAM_BW_OPTIMIZATION (1)
 	#define SMI_PARAM_BUS_OPTIMIZATION (0x7F)
@@ -19,6 +60,13 @@
 	#define SMI_PARAM_DISABLE_FREQ_HOPPING (0)
 	#define SMI_PARAM_DISABLE_FREQ_MUX (1)
 	#define SMI_PARAM_DISABLE_MMDVFS (0)
+#elif defined(SMI_BRINGUP)
+	#define SMI_PARAM_BW_OPTIMIZATION (0)
+	#define SMI_PARAM_BUS_OPTIMIZATION (0x7F)
+	#define SMI_PARAM_ENABLE_IOCTL (0)
+	#define SMI_PARAM_DISABLE_FREQ_HOPPING (1)
+	#define SMI_PARAM_DISABLE_FREQ_MUX (1)
+	#define SMI_PARAM_DISABLE_MMDVFS (1)
 #endif
 /* ***********debug parameters************/
 
@@ -28,6 +76,20 @@
 
 
 #if defined(SMI_D1) || defined(SMI_D3) || defined(SMI_J)
+#define SMI_LARB0_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_LARB1_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_LARB2_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_LARB3_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_COMMON_DEBUG_OFFSET_NUM SMI_COMMON_DEFAULT_DEBUG_OFFSET_NUM
+
+#elif defined(SMI_D3)
+#define SMI_LARB0_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_LARB1_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_LARB2_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_LARB3_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
+#define SMI_COMMON_DEBUG_OFFSET_NUM SMI_COMMON_DEFAULT_DEBUG_OFFSET_NUM
+
+#elif defined(SMI_J)
 #define SMI_LARB0_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
 #define SMI_LARB1_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
 #define SMI_LARB2_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
@@ -55,6 +117,8 @@
 #define SMI_LARB6_DEBUG_OFFSET_NUM SMI_LARB_DEFAULT_DEBUG_OFFSET_NUM
 #define SMI_COMMON_DEBUG_OFFSET_NUM 23
 
+#elif defined(SMI_BRINGUP)
+#define SMI_COMMON_DEBUG_OFFSET_NUM SMI_COMMON_DEFAULT_DEBUG_OFFSET_NUM
 #endif
 
 
@@ -101,5 +165,6 @@ extern int smi_larb_debug_offset_num[SMI_LARB_NR];
 extern unsigned long *smi_larb_debug_offset[SMI_LARB_NR];
 extern struct SMI_SETTING_VALUE smi_vc_setting[SMI_VC_SETTING_NUM];
 extern struct SMI_CLK_INFO smi_clk_info[SMI_CLK_CNT];
-
+extern struct SMI_SETTING_VALUE *smi_larb_restore[SMI_LARB_NR];
+extern unsigned int smi_restore_num[SMI_LARB_NR];
 #endif

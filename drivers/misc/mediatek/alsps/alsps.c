@@ -1,3 +1,16 @@
+/*
+* Copyright (C) 2013 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
+
 #include "inc/alsps.h"
 #include "inc/aal_control.h"
 struct alsps_context *alsps_context_obj = NULL;
@@ -71,7 +84,7 @@ static void als_work_func(struct work_struct *work)
 			goto als_loop;
 		}
 	}
-	ALSPS_LOG(" als data[%d]\n" , cxt->drv_data.als_data.values[0]);
+	/* ALSPS_LOG(" als data[%d]\n" , cxt->drv_data.als_data.values[0]); */
 	als_data_report(cxt->idev,
 	cxt->drv_data.als_data.values[0],
 	cxt->drv_data.als_data.status);
@@ -122,7 +135,7 @@ static void ps_work_func(struct work_struct *work)
 	}
 
 	if (cxt->is_get_valid_ps_data_after_enable == false) {
-        	if(ALSPS_INVALID_VALUE != cxt->drv_data.ps_data.values[0])
+		if (ALSPS_INVALID_VALUE != cxt->drv_data.ps_data.values[0])
 			cxt->is_get_valid_ps_data_after_enable = true;
 	}
 
@@ -203,7 +216,7 @@ static int als_real_enable(int enable)
 	if (1 == enable) {
 		if (true == cxt->is_als_active_data || true == cxt->is_als_active_nodata) {
 			err = cxt->als_ctl.enable_nodata(1);
-			if (err)
+			if (err) {
 				err = cxt->als_ctl.enable_nodata(1);
 				if (err) {
 					err = cxt->als_ctl.enable_nodata(1);
@@ -211,7 +224,8 @@ static int als_real_enable(int enable)
 						ALSPS_ERR("alsps enable(%d) err 3 timers = %d\n", enable, err);
 				}
 			}
-			ALSPS_LOG("alsps real enable\n");
+		}
+		ALSPS_LOG("alsps real enable\n");
 	}
 
 	if (0 == enable) {
@@ -338,8 +352,8 @@ static int ps_enable_data(int enable)
 		ALSPS_LOG("PS disable\n");
 		cxt->is_ps_active_data = false;
 		cxt->ps_ctl.open_report_data(0);
-#ifdef ps_polling		
-		if (true == cxt->is_ps_polling_run) {
+#ifdef ps_polling
+	if (true == cxt->is_ps_polling_run) {
 			if (false == cxt->ps_ctl.is_report_input_direct) {
 				cxt->is_ps_polling_run = false;
 				smp_mb();/* for memory barrier*/
@@ -384,8 +398,8 @@ static ssize_t als_show_active(struct device *dev,
 
 	cxt = alsps_context_obj;
 	div = cxt->als_data.vender_div;
-	ALSPS_LOG("als vender_div value: %d en = %d\n", div,cxt->is_als_active_data);
-	return snprintf(buf, PAGE_SIZE, "en = %d\n", cxt->is_als_active_data);
+	ALSPS_LOG("als vender_div value: %d\n", div);
+	return snprintf(buf, PAGE_SIZE, "%d\n", div);
 }
 
 static ssize_t als_store_delay(struct device *dev, struct device_attribute *attr,
@@ -493,8 +507,14 @@ static ssize_t als_show_devnum(struct device *dev,
 	unsigned int devnum;
 	const char *devname = NULL;
 	int ret;
+	struct input_handle *handle;
 
-	devname = dev_name(&alsps_context_obj->idev->dev);
+	list_for_each_entry(handle, &alsps_context_obj->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
+
 	ret = sscanf(devname+5, "%d", &devnum);
 	return snprintf(buf, PAGE_SIZE, "%d\n", devnum);
 }
@@ -527,8 +547,8 @@ static ssize_t ps_show_active(struct device *dev,
 
 	cxt = alsps_context_obj;
 	div = cxt->ps_data.vender_div;
-	ALSPS_LOG("ps vender_div value: %d en = %d \n", div,cxt->is_ps_active_data);
-	return snprintf(buf, PAGE_SIZE, "en = %d\n", cxt->is_ps_active_data);
+	ALSPS_LOG("ps vender_div value: %d\n", div);
+	return snprintf(buf, PAGE_SIZE, "%d\n", div);
 }
 
 static ssize_t ps_store_delay(struct device *dev, struct device_attribute *attr,
@@ -587,8 +607,8 @@ static ssize_t ps_store_batch(struct device *dev, struct device_attribute *attr,
 	if (cxt->ps_ctl.is_support_batch) {
 		if (!strncmp(buf, "1", 1)) {
 			cxt->is_ps_batch_enable = true;
-#ifdef ps_polling			
-			if (true == cxt->is_ps_polling_run) {
+#ifdef ps_polling
+		if (true == cxt->is_ps_polling_run) {
 				cxt->is_ps_polling_run = false;
 				del_timer_sync(&cxt->timer_ps);
 				cancel_work_sync(&cxt->report_ps);
@@ -599,7 +619,7 @@ static ssize_t ps_store_batch(struct device *dev, struct device_attribute *attr,
 #endif			
 		} else if (!strncmp(buf, "0", 1)) {
 			cxt->is_ps_batch_enable = false;
-#ifdef ps_polling				
+#ifdef ps_polling
 			if (false == cxt->is_ps_polling_run) {
 				if (false == cxt->ps_ctl.is_report_input_direct) {
 					mod_timer(&cxt->timer_ps, jiffies + atomic_read(&cxt->delay_ps)/(1000/HZ));
@@ -643,8 +663,14 @@ static ssize_t ps_show_devnum(struct device *dev,
 	unsigned int devnum;
 	const char *devname = NULL;
 	int ret;
+	struct input_handle *handle;
 
-	devname = dev_name(&alsps_context_obj->idev->dev);
+	list_for_each_entry(handle, &alsps_context_obj->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
+
 	ret = sscanf(devname+5, "%d", &devnum);
 	return snprintf(buf, PAGE_SIZE, "%d\n", devnum);
 }
@@ -749,7 +775,7 @@ int ps_report_interrupt_data(int value)
 	struct alsps_context *cxt = NULL;
 	/* int err =0; */
 	cxt = alsps_context_obj;
-#ifdef ps_polling	
+#ifdef ps_polling
 	if (cxt->is_get_valid_ps_data_after_enable == false) {
 		if (ALSPS_INVALID_VALUE != value) {
 			cxt->is_get_valid_ps_data_after_enable = true;
@@ -1054,16 +1080,12 @@ exit_alloc_data_failed:
 
 static int alsps_remove(void)
 {
-	int err = 0;
-
 	ALSPS_FUN(f);
 	input_unregister_device(alsps_context_obj->idev);
 	sysfs_remove_group(&alsps_context_obj->idev->dev.kobj,
 				&alsps_attribute_group);
 
-	err = misc_deregister(&alsps_context_obj->mdev);
-	if (err)
-		ALSPS_ERR("misc_deregister fail: %d\n", err);
+	misc_deregister(&alsps_context_obj->mdev);
 	kfree(alsps_context_obj);
 
 	return 0;

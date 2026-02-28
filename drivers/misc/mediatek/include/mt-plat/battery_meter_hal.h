@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _BATTERY_METER_HAL_H
 #define _BATTERY_METER_HAL_H
 
@@ -6,10 +19,10 @@
 /* define */
 /* ============================================================ */
 //CEI comment start//
-// #define BM_LOG_CRTI 7
-#define BM_LOG_CRTI 6
+// #define BM_LOG_CRTI (7)
+#define BM_LOG_CRTI (6)
 //CEI comment end
-#define BM_LOG_FULL 8
+#define BM_LOG_FULL (8)
 
 #define bm_print(num, fmt, args...)   \
 do {									\
@@ -25,7 +38,7 @@ do {									\
 #define BMLOG_DEBUG_LEVEL   7
 #define BMLOG_TRACE_LEVEL   8
 
-
+//CEI comment start//
 #define bm_err(fmt, args...)   \
 do {									\
 	if (Enable_FGADC_LOG >= BMLOG_ERROR_LEVEL) {			\
@@ -67,7 +80,7 @@ do {									\
 		pr_err(fmt, ##args);\
 	}						\
 } while (0)
-
+//CEI comment end//
 
 #define BM_DAEMON_DEFAULT_LOG_LEVEL 3
 
@@ -97,7 +110,9 @@ typedef enum {
 	BATTERY_METER_CMD_SET_LOW_BAT_INTERRUPT,
 	BATTERY_METER_CMD_GET_LOW_BAT_INTERRUPT_STATUS,
 	BATTERY_METER_CMD_GET_REFRESH_HW_OCV,
-
+	BATTERY_METER_CMD_SET_META_CALI_CURRENT,
+	BATTERY_METER_CMD_META_CALI_CAR_TUNE_VALUE,
+	BATTERY_METER_CMD_GET_IS_HW_OCV_READY,
 //CEI comments start//
 	BATTERY_METER_CMD_GET_ADC_V_BAT_ID,
 //CEI comments end//
@@ -132,6 +147,5 @@ extern int Enable_FGADC_LOG;
 /* External function */
 /* ============================================================ */
 extern signed int bm_ctrl_cmd(BATTERY_METER_CTRL_CMD cmd, void *data);
-
 
 #endif				/* #ifndef _BATTERY_METER_HAL_H */

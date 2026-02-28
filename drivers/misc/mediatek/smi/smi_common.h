@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef __SMI_COMMON_H__
 #define __SMI_COMMON_H__
 
@@ -21,7 +34,8 @@
 	do {\
 		if (onoff == 1)\
 			cmdq_core_save_first_dump(string, ##args);\
-		SMIMSG(string, ##args);\
+		else\
+			SMIMSG(string, ##args);\
 	} while (0)
 #else
 #define SMIMSG3(string, args...) SMIMSG(string, ##args)
@@ -63,5 +77,6 @@ extern void smi_dumpCommon(void);
 
 extern struct SMI_PROFILE_CONFIG smi_profile_config[SMI_PROFILE_CONFIG_NUM];
 extern int smi_bus_regs_setting(int larb_id, int profile, struct SMI_SETTING *settings);
+extern int smi_common_setting(int profile, struct SMI_SETTING *settings);
 
 #endif

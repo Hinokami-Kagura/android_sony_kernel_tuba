@@ -11,32 +11,9 @@
  *
  */
 
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
-
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
 #include "gmagrotvechub.h"
 #include <gmrv.h>
-#include <linux/hwmsen_helper.h>
-
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include <linux/batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
@@ -140,9 +117,10 @@ static int gmagrotvec_get_data(int *x, int *y, int *z, int *scalar, int *status)
 	*x				= data.magnetic_t.azimuth;
 	*y				= data.magnetic_t.pitch;
 	*z				= data.magnetic_t.roll;
+	*scalar				= data.magnetic_t.scalar;
 	*status		= data.magnetic_t.status;
-	GMAGROTVEC_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d!\n",
-		time_stamp, time_stamp_gpt, *x, *y, *z);
+	/* GMAGROTVEC_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d!\n",
+		time_stamp, time_stamp_gpt, *x, *y, *z); */
 	return 0;
 }
 static int gmagrotvec_open_report_data(int open)
@@ -174,8 +152,8 @@ static int gmagrotvechub_local_init(void)
 	ctl.open_report_data = gmagrotvec_open_report_data;
 	ctl.enable_nodata = gmagrotvec_enable_nodata;
 	ctl.set_delay = gmagrotvec_set_delay;
-	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_report_input_direct = true;
+	ctl.is_support_batch = false;
 	err = gmrv_register_control_path(&ctl);
 	if (err) {
 		GMAGROTVEC_ERR("register gmagrotvec control path err\n");
@@ -183,9 +161,15 @@ static int gmagrotvechub_local_init(void)
 	}
 
 	data.get_data = gmagrotvec_get_data;
+	data.vender_div = 1000000;
 	err = gmrv_register_data_path(&data);
 	if (err) {
 		GMAGROTVEC_ERR("register gmagrotvec data path err\n");
+		goto exit;
+	}
+	err = batch_register_support_info(ID_GEOMAGNETIC_ROTATION_VECTOR, ctl.is_support_batch, data.vender_div, 1);
+	if (err) {
+		GMAGROTVEC_ERR("register magnetic batch support err = %d\n", err);
 		goto exit;
 	}
 	return 0;

@@ -28,13 +28,9 @@
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/byteorder/generic.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif
 #include <linux/interrupt.h>
 #include <linux/input/mt.h>
 #include <linux/time.h>
-#include <linux/rtpm_prio.h>
 #include <linux/proc_fs.h>
 #include <linux/jiffies.h>
 #include <linux/spinlock.h>
@@ -416,7 +412,9 @@ char finger_prestate[MAX_NUM_OF_FINGER];
 
 static bool Power_status;
 char knock_on_type;
+#ifdef KNOCK_ON_EN
 static int knock_on_enable;
+#endif				/* KNOCK_ON_EN */
 
 /* extern int Touch_Quick_Cover_Closed; */
 /*knock on/code Parameter*/
@@ -523,9 +521,10 @@ static int sleep_control(struct i2c_client *client, int mode, int recal);
 static int lpwg_control(int mode);
 static int sleep_control(struct i2c_client *client, int mode, int recal);
 static int tci_control(struct i2c_client *client, int type, u8 value);
+#ifdef KNOCK_ON_EN
 static int synaptics_ts_get_data(struct i2c_client *client);
 static int get_tci_data(struct i2c_client *client, int count);
-
+#endif				/* KNOCK_ON_EN */
 
 static void synaptics_lpwg_update_all(struct work_struct *knock_set_work);
 static enum hrtimer_restart synaptics_notify_timer_handler(struct hrtimer *notify_timer);
@@ -586,7 +585,7 @@ static void synaptics_setup_eint(void)
 
 	/* Configure GPIO settings for external interrupt pin  */
 	SYNAP_GPIO_OUTPUT(SYNAP_INT_PORT, 0);
-	mdelay(50);
+	msleep(50);
 	SYNAP_GPIO_AS_INT(SYNAP_INT_PORT);
 
 	/* ret = gpio_to_irq(P_GPIO_CTP_EINT_PIN); */
@@ -1227,6 +1226,7 @@ error:
 	return;
 }
 
+#ifdef KNOCK_ON_EN
 static int get_tci_data(struct i2c_client *client, int count)
 {
 	int ret = 0;
@@ -1328,6 +1328,7 @@ static int synaptics_ts_get_data(struct i2c_client *client)
 error:
 	return -1;
 }
+#endif				/* KNOCK_ON_EN */
 
 
 static int sleep_control(struct i2c_client *client, int mode, int recal)
@@ -1975,7 +1976,7 @@ static int synaptics_touch_event_handler(void *unused)
 	touch_finger_info finger_info;
 	char report_enable = 0;
 
-	struct sched_param param = {.sched_priority = RTPM_PRIO_TPD };
+	struct sched_param param = {.sched_priority = 4 };
 
 	sched_setscheduler(current, SCHED_RR, &param);
 
@@ -2020,7 +2021,7 @@ static int synaptics_touch_event_handler(void *unused)
 			TPD_ERR("INTERRUPT_STATUS_REG read fail\n");
 			goto exit_work;
 		}
-
+#ifdef KNOCK_ON_EN
 		if (int_status == 0) {
 			TPD_LOG("KNOCK ISSUE ");
 			/* goto exit_work; */
@@ -2040,6 +2041,7 @@ static int synaptics_touch_event_handler(void *unused)
 
 			goto exit_work;
 		}
+#endif				/* KNOCK_ON_EN */
 
 		ret =
 		    synaptics_ts_read(tpd_i2c_client, INTERRUPT_ENABLE_REG, 1, (u8 *) &int_enable);
@@ -2215,7 +2217,9 @@ static enum hrtimer_restart synaptics_notify_timer_handler(struct hrtimer *notif
 {
 	TPD_FUN();
 
+#ifdef KNOCK_ON_EN
 	queue_delayed_work(knock_set_work_wq, &knock_set_work, 0);
+#endif				/* KNOCK_ON_EN */
 
 	return HRTIMER_NORESTART;
 }
@@ -2333,6 +2337,7 @@ static ssize_t store_lpwg_notify(struct device *dev, struct device_attribute *at
 		synaptics_knock_lpwg(tpd_i2c_client, LPWG_DOUBLE_TAP_CHECK, value[0], NULL);
 		break;
 	case 9:
+#ifdef KNOCK_ON_EN
 		if (cancel_delayed_work_sync(&knock_set_work))
 			TPD_LOG("Pending queueu work");
 		else
@@ -2344,6 +2349,7 @@ static ssize_t store_lpwg_notify(struct device *dev, struct device_attribute *at
 			TPD_LOG("Pending htimer callback");
 			hrtimer_cancel(&notify_timer);
 		}
+#endif				/* KNOCK_ON_EN */
 
 		v = &value[0];
 		lpwg_mode = *(v + 0);
@@ -2353,17 +2359,23 @@ static ssize_t store_lpwg_notify(struct device *dev, struct device_attribute *at
 
 
 		if (lpwg_mode == 1) {	/* Knock on */
+#ifdef KNOCK_ON_EN
 			knock_on_enable = 1;
+#endif				/* KNOCK_ON_EN */
 			double_tap_enable = 1;
 			multi_tap_enable = 0;
 
 		} else if (lpwg_mode == 2) {	/* Knock code */
+#ifdef KNOCK_ON_EN
 			knock_on_enable = 1;
+#endif				/* KNOCK_ON_EN */
 			double_tap_enable = 1;
 			multi_tap_enable = 1;
 		} else {	/* idle */
 
+#ifdef KNOCK_ON_EN
 			knock_on_enable = 0;
+#endif				/* KNOCK_ON_EN */
 			double_tap_enable = 0;
 			multi_tap_enable = 0;
 		}
@@ -2398,12 +2410,16 @@ static ssize_t store_lpwg_notify(struct device *dev, struct device_attribute *at
 				goto error;
 			}
 #endif				/* DEF_DO_SAFE */
+#ifdef KNOCK_ON_EN
 			hrtimer_start(&notify_timer, ktime_set(0, MS_TO_NS(50)), HRTIMER_MODE_REL);
+#endif				/* KNOCK_ON_EN */
 		}
+#ifdef KNOCK_ON_EN
 		if (ret == 1) {
 			hrtimer_start(&notify_timer, ktime_set(0, MS_TO_NS(50)), HRTIMER_MODE_REL);
 			TPD_LOG("Cancle notify timer");
 		}
+#endif				/* KNOCK_ON_EN */
 		TPD_LOG("END NOTIFY");
 		break;
 	case 10:
@@ -3128,15 +3144,15 @@ static int synaptics_local_init(void)
 	return 0;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void synaptics_suspend(struct early_suspend *h)
+static void synaptics_suspend(struct device *h)
 {
-	int ret = 0;
+	/* int ret = 0; */
 
 	TPD_FUN();
 
 	suspend_status = 1;
 
+#ifdef KNOCK_ON_EN
 	if (cancel_delayed_work_sync(&knock_set_work))
 		TPD_LOG("pending queue work\n");
 
@@ -3144,17 +3160,27 @@ static void synaptics_suspend(struct early_suspend *h)
 		TPD_LOG("pending callback\n");
 		hrtimer_cancel(&notify_timer);
 	}
+#endif				/* KNOCK_ON_EN */
 
 	synaptics_release_all_finger();
 
+#ifdef KNOCK_ON_EN
 	ret = hrtimer_start(&notify_timer, ktime_set(0, MS_TO_NS(50)), HRTIMER_MODE_REL);
 	TPD_LOG("hrtimer_start return value  = %d", ret);
+#endif				/* KNOCK_ON_EN */
+
+	if (key_lock_status == 0)
+		disable_irq(touch_irq);
+	else
+		enable_irq(touch_irq);
+
 }
 
-static void synaptics_resume(struct early_suspend *h)
+static void synaptics_resume(struct device *h)
 {
 	TPD_FUN();
 
+#ifdef KNOCK_ON_EN
 	if (cancel_delayed_work_sync(&knock_set_work))
 		TPD_LOG("pending queue work\n");
 
@@ -3162,6 +3188,7 @@ static void synaptics_resume(struct early_suspend *h)
 		TPD_LOG("pending callback\n");
 		hrtimer_cancel(&notify_timer);
 	}
+#endif				/* KNOCK_ON_EN */
 
 	synaptics_ic_reset();
 	synaptics_initialize(tpd_i2c_client);
@@ -3174,7 +3201,6 @@ static void synaptics_resume(struct early_suspend *h)
 
 	suspend_status = 0;
 }
-#endif
 
 #ifdef CONFIG_MTK_LEGACY
 static struct i2c_board_info i2c_tpd __initdata = { I2C_BOARD_INFO(TPD_DEV_NAME, TPD_I2C_ADDRESS) };
@@ -3183,10 +3209,8 @@ static struct i2c_board_info i2c_tpd __initdata = { I2C_BOARD_INFO(TPD_DEV_NAME,
 static struct tpd_driver_t tpd_device_driver = {
 	.tpd_device_name = TPD_DEV_NAME,
 	.tpd_local_init = synaptics_local_init,
-#ifdef CONFIG_HAS_EARLYSUSPEND
 	.suspend = synaptics_suspend,
 	.resume = synaptics_resume,
-#endif
 #ifdef TPD_HAVE_BUTTON
 	.tpd_have_button = 1,
 #else

@@ -10,42 +10,17 @@
  * GNU General Public License for more details.
  *
  */
-
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
-
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
 #include "gravityhub.h"
 #include <gravity.h>
-#include <linux/hwmsen_helper.h>
-
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include <linux/batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
 
-
 #define GRVTY_TAG                  "[gravhub] "
-#define GRVTY_FUN(f)               printk(GRVTY_TAG"%s\n", __func__)
-#define GRVTY_ERR(fmt, args...)    printk(GRVTY_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
-#define GRVTY_LOG(fmt, args...)    printk(GRVTY_TAG fmt, ##args)
+#define GRVTY_FUN(f)               pr_debug(GRVTY_TAG"%s\n", __func__)
+#define GRVTY_ERR(fmt, args...)    pr_err(GRVTY_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
+#define GRVTY_LOG(fmt, args...)    pr_debug(GRVTY_TAG fmt, ##args)
 
 typedef enum {
 	GRAVHUB_TRC_INFO = 0X10,
@@ -142,8 +117,8 @@ static int grav_get_data(int *x, int *y, int *z, int *status)
 	*y = data.accelerometer_t.y;
 	*z = data.accelerometer_t.z;
 	*status = data.accelerometer_t.status;
-	GRVTY_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d!\n", time_stamp, time_stamp_gpt,
-		*x, *y, *z);
+	/* GRVTY_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d!\n",
+			time_stamp, time_stamp_gpt, *x, *y, *z); */
 	return 0;
 }
 static int grav_open_report_data(int open)
@@ -175,8 +150,8 @@ static int gravityhub_local_init(void)
 	ctl.open_report_data = grav_open_report_data;
 	ctl.enable_nodata = grav_enable_nodata;
 	ctl.set_delay = grav_set_delay;
-	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_report_input_direct = true;
+	ctl.is_support_batch = false;
 	err = grav_register_control_path(&ctl);
 	if (err) {
 		GRVTY_ERR("register gravity control path err\n");
@@ -184,9 +159,15 @@ static int gravityhub_local_init(void)
 	}
 
 	data.get_data = grav_get_data;
+	data.vender_div = 1000;
 	err = grav_register_data_path(&data);
 	if (err) {
 		GRVTY_ERR("register gravity data path err\n");
+		goto exit;
+	}
+	err = batch_register_support_info(ID_GRAVITY, ctl.is_support_batch, data.vender_div, 1);
+	if (err) {
+		GRVTY_ERR("register magnetic batch support err = %d\n", err);
 		goto exit;
 	}
 	return 0;

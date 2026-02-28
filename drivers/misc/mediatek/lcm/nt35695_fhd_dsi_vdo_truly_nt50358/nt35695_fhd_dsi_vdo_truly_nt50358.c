@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #define LOG_TAG "LCM"
 
 #ifndef BUILD_LK
@@ -49,7 +62,8 @@ static LCM_UTIL_FUNCS lcm_util;
 #define UDELAY(n)		(lcm_util.udelay(n))
 
 
-
+#define dsi_set_cmdq_V22(cmdq, cmd, count, ppara, force_update) \
+	lcm_util.dsi_set_cmdq_V22(cmdq, cmd, count, ppara, force_update)
 #define dsi_set_cmdq_V2(cmd, count, ppara, force_update) \
 	lcm_util.dsi_set_cmdq_V2(cmd, count, ppara, force_update)
 #define dsi_set_cmdq(pdata, queue_size, force_update) \
@@ -191,7 +205,7 @@ static void __exit tps65132_iic_exit(void)
 module_init(tps65132_iic_init);
 module_exit(tps65132_iic_exit);
 
-MODULE_AUTHOR("Xiaokuan Shi");
+MODULE_AUTHOR("Mike Liu");
 MODULE_DESCRIPTION("MTK TPS65132 I2C Driver");
 MODULE_LICENSE("GPL");
 #endif
@@ -202,6 +216,10 @@ static const unsigned char LCD_MODULE_ID = 0x01;
 #define LCM_DSI_CMD_MODE									0
 #define FRAME_WIDTH										(1080)
 #define FRAME_HEIGHT									(1920)
+
+#define LCM_PHYSICAL_WIDTH									(74520)
+#define LCM_PHYSICAL_HEIGHT									(132480)
+
 
 #ifndef CONFIG_FPGA_EARLY_PORTING
 #define GPIO_65132_EN GPIO_LCD_BIAS_ENP_PIN
@@ -238,6 +256,9 @@ static struct LCM_setting_table lcm_suspend_setting[] = {
 };
 
 static struct LCM_setting_table init_setting[] = {
+	{0xFF, 1, {0x24} },
+	{0xFB, 1, {0x01} },
+	{0x2D, 1, {0x08} },
 	{0xFF, 1, {0x24} },	/* Return  To      CMD1 */
 	{0x6E, 1, {0x10} },	/* Return  To      CMD1 */
 	{0xFB, 1, {0x01} },	/* Return  To      CMD1 */
@@ -807,6 +828,9 @@ static struct LCM_setting_table init_setting[] = {
 };
 
 static struct LCM_setting_table init_setting2[] = {
+	{0xFF, 1, {0x24} },
+	{0xFB, 1, {0x01} },
+	{0x2D, 1, {0x08} },
 	{0xFF, 1, {0x24} },	/* Return  To      CMD1 */
 	{0x6E, 1, {0x10} },	/* Return  To      CMD1 */
 	{0xFB, 1, {0x01} },	/* Return  To      CMD1 */
@@ -1374,6 +1398,7 @@ static struct LCM_setting_table init_setting2[] = {
 	{0x29, 0, {} },
 	/* {0x51,1,{0xFF}},//writedisplay brightness */
 };
+
 #if 0
 static struct LCM_setting_table lcm_set_window[] = {
 	{0x2A, 4, {0x00, 0x00, (FRAME_WIDTH >> 8), (FRAME_WIDTH & 0xFF)} },
@@ -1409,7 +1434,8 @@ static struct LCM_setting_table bl_level[] = {
 	{REGFLAG_END_OF_TABLE, 0x00, {} }
 };
 
-static void push_table(struct LCM_setting_table *table, unsigned int count, unsigned char force_update)
+static void push_table(void *cmdq, struct LCM_setting_table *table,
+	unsigned int count, unsigned char force_update)
 {
 	unsigned int i;
 	unsigned cmd;
@@ -1435,7 +1461,7 @@ static void push_table(struct LCM_setting_table *table, unsigned int count, unsi
 			break;
 
 		default:
-			dsi_set_cmdq_V2(cmd, table[i].count, table[i].para_list, force_update);
+			dsi_set_cmdq_V22(cmdq, cmd, table[i].count, table[i].para_list, force_update);
 		}
 	}
 }
@@ -1455,6 +1481,11 @@ static void lcm_get_params(LCM_PARAMS *params)
 
 	params->width = FRAME_WIDTH;
 	params->height = FRAME_HEIGHT;
+	params->physical_width = LCM_PHYSICAL_WIDTH/1000;
+	params->physical_height = LCM_PHYSICAL_HEIGHT/1000;
+	params->physical_width_um = LCM_PHYSICAL_WIDTH;
+	params->physical_height_um = LCM_PHYSICAL_HEIGHT;
+
 
 #if (LCM_DSI_CMD_MODE)
 	params->dsi.mode = CMD_MODE;
@@ -1486,19 +1517,22 @@ static void lcm_get_params(LCM_PARAMS *params)
 	params->dsi.vertical_sync_active = 2;
 	params->dsi.vertical_backporch = 8;
 	params->dsi.vertical_frontporch = 10;
+	params->dsi.vertical_frontporch_for_low_power = 400;
 	params->dsi.vertical_active_line = FRAME_HEIGHT;
 
 	params->dsi.horizontal_sync_active = 10;
 	params->dsi.horizontal_backporch = 20;
 	params->dsi.horizontal_frontporch = 40;
 	params->dsi.horizontal_active_pixel = FRAME_WIDTH;
-	/* params->dsi.ssc_disable                                                   = 1; */
+	params->dsi.ssc_disable = 1;
 #ifndef CONFIG_FPGA_EARLY_PORTING
 #if (LCM_DSI_CMD_MODE)
 	params->dsi.PLL_CLOCK = 420;	/* this value must be in MTK suggested table */
 #else
 	params->dsi.PLL_CLOCK = 440;	/* this value must be in MTK suggested table */
 #endif
+	params->dsi.PLL_CK_CMD = 420;
+	params->dsi.PLL_CK_VDO = 440;
 #else
 	params->dsi.pll_div1 = 0;
 	params->dsi.pll_div2 = 0;
@@ -1653,17 +1687,17 @@ static void lcm_init(void)
 	SET_RESET_PIN(1);
 	MDELAY(10);
 	if (lcm_dsi_mode == CMD_MODE) {
-		push_table(init_setting2, sizeof(init_setting2) / sizeof(struct LCM_setting_table), 1);
+		push_table(NULL, init_setting2, sizeof(init_setting2) / sizeof(struct LCM_setting_table), 1);
 		LCM_LOGI("nt35695----tps6132----lcm mode = cmd mode :%d----\n", lcm_dsi_mode);
 	} else {
-		push_table(init_setting, sizeof(init_setting) / sizeof(struct LCM_setting_table), 1);
+		push_table(NULL, init_setting, sizeof(init_setting) / sizeof(struct LCM_setting_table), 1);
 		LCM_LOGI("nt35695----tps6132----lcm mode = vdo mode :%d----\n", lcm_dsi_mode);
 	}
 }
 
 static void lcm_suspend(void)
 {
-	push_table(lcm_suspend_setting, sizeof(lcm_suspend_setting) / sizeof(struct LCM_setting_table), 1);
+	push_table(NULL, lcm_suspend_setting, sizeof(lcm_suspend_setting) / sizeof(struct LCM_setting_table), 1);
 	MDELAY(10);
 #ifndef CONFIG_FPGA_EARLY_PORTING
 #ifdef CONFIG_MTK_LEGACY
@@ -1825,18 +1859,9 @@ static void lcm_setbacklight_cmdq(void *handle, unsigned int level)
 
 	bl_level[0].para_list[0] = level;
 
-	push_table(bl_level, sizeof(bl_level) / sizeof(struct LCM_setting_table), 1);
+	push_table(handle, bl_level, sizeof(bl_level) / sizeof(struct LCM_setting_table), 1);
 }
-/*
-static void lcm_setbacklight(unsigned int level)
-{
-	LCM_LOGI("%s,nt35695 backlight: level = %d\n", __func__, level);
 
-	bl_level[0].para_list[0] = level;
-
-	push_table(bl_level, sizeof(bl_level) / sizeof(struct LCM_setting_table), 1);
-}
-*/
 static void *lcm_switch_mode(int mode)
 {
 #ifndef BUILD_LK

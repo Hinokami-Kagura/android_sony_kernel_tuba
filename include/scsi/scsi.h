@@ -83,7 +83,6 @@ enum scsi_timeouts {
 #define SET_WINDOW            0x24
 #define READ_CAPACITY         0x25
 #define READ_10               0x28
-#define READ_CAPACITY_16      0x9e
 #define WRITE_10              0x2a
 #define SEEK_10               0x2b
 #define POSITION_TO_ELEMENT   0x2b

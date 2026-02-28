@@ -1,3 +1,16 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -7,6 +20,7 @@
 #include <linux/jiffies.h>
 #include <linux/clockchips.h>
 #include <linux/clocksource.h>
+#include <linux/clk.h>
 
 #include <linux/io.h>
 
@@ -101,8 +115,6 @@ unsigned int tick;
 
 static struct gpt_device *id_to_dev(unsigned int id)
 {
-	if ((id == GPT3) || (id == GPT6))
-		return NULL;
 	return id < NR_GPTS ? gpt_devs + id : NULL;
 }
 
@@ -136,7 +148,7 @@ static void mt_gpt_set_mode(enum clock_event_mode mode, struct clock_event_devic
 
 static struct clocksource gpt_clocksource = {
 	.name	= "mtk-timer",
-	.rating	= 450,
+	.rating	= 300,
 	.read	= mt_gpt_read,
 	.mask	= CLOCKSOURCE_MASK(32),
 	.shift  = 25,
@@ -412,16 +424,6 @@ static cycle_t mt_gpt_read(struct clocksource *cs)
 	return cycles;
 }
 
-static u64 notrace mt_read_sched_clock(void)
-{
-	return mt_gpt_read(NULL);
-}
-
-static cycle_t mt_read_sched_clock_cc(const struct cyclecounter *cc)
-{
-	return mt_gpt_read(NULL);
-}
-
 static void clkevt_handler(unsigned long data)
 {
 	struct clock_event_device *evt = (struct clock_event_device *)data;
@@ -429,36 +431,20 @@ static void clkevt_handler(unsigned long data)
 	evt->event_handler(evt);
 }
 
-static struct cyclecounter mt_cyclecounter = {
-	.read	= mt_read_sched_clock_cc,
-	.mask	= CLOCKSOURCE_MASK(32),
-};
-
 static inline void setup_clksrc(u32 freq)
 {
 	struct clocksource *cs = &gpt_clocksource;
 	struct gpt_device *dev = id_to_dev(GPT_CLKSRC_ID);
-	struct timecounter *mt_timecounter;
-	u64 start_count;
 
 	pr_alert("setup_clksrc1: dev->base_addr=0x%lx GPT2_CON=0x%x\n",
 		(unsigned long)dev->base_addr, __raw_readl(dev->base_addr));
 	cs->mult = clocksource_hz2mult(freq, cs->shift);
-
-	/* sched_clock_register(mt_read_sched_clock, 32, freq); */
 
 	setup_gpt_dev_locked(dev, GPT_FREE_RUN, GPT_CLK_SRC_SYS, GPT_CLK_DIV_1,
 		0, NULL, 0);
 
 	clocksource_register(cs);
 
-	start_count = mt_read_sched_clock();
-	mt_cyclecounter.mult = cs->mult;
-	mt_cyclecounter.shift = cs->shift;
-	mt_timecounter = arch_timer_get_timecounter();
-	timecounter_init(mt_timecounter, &mt_cyclecounter, start_count);
-	pr_alert("setup_clksrc1: mt_cyclecounter.mult=0x%x mt_cyclecounter.shift=0x%x\n",
-		mt_cyclecounter.mult, mt_cyclecounter.shift);
 	pr_alert("setup_clksrc2: dev->base_addr=0x%lx GPT2_CON=0x%x\n",
 		(unsigned long)dev->base_addr, __raw_readl(dev->base_addr));
 }
@@ -498,37 +484,46 @@ static  void setup_syscnt(void)
 static void __init mt_gpt_init(struct device_node *node)
 {
 	int i;
-	u32 freq;
+	u32 freq = 0;
 	unsigned long save_flags;
+	struct clk *clk;
 
-		gpt_update_lock(save_flags);
+	gpt_update_lock(save_flags);
 
-		/* freq=SYS_CLK_RATE */
-		if (of_property_read_u32(node, "clock-frequency", &freq))
-			pr_err("clock-frequency not set in the .dts file");
+	/* Setup IRQ numbers */
+	xgpt_timers.tmr_irq = irq_of_parse_and_map(node, 0);
 
-		/* Setup IRQ numbers */
-		xgpt_timers.tmr_irq = irq_of_parse_and_map(node, 0);
+	/* Setup IO addresses */
+	xgpt_timers.tmr_regs = of_iomap(node, 0);
 
-		/* Setup IO addresses */
-		xgpt_timers.tmr_regs = of_iomap(node, 0);
+	/* freq=SYS_CLK_RATE */
+	clk = of_clk_get(node, 0);
+	if (IS_ERR(clk))
+		pr_alert("Can't get timer clock");
 
-		boot_time_value = xgpt_boot_up_time(); /*record the time when init GPT*/
+	if (clk_prepare_enable(clk))
+		pr_alert("Can't prepare clock");
 
-		pr_alert("mt_gpt_init: tmr_regs=0x%lx, tmr_irq=%d, freq=%d\n",
-			(unsigned long)xgpt_timers.tmr_regs, xgpt_timers.tmr_irq, freq);
+	freq = (u32)clk_get_rate(clk);
+	if (!freq)
+		BUG();
 
-		gpt_devs_init();
-		for (i = 0; i < NR_GPTS; i++)
-			__gpt_reset(&gpt_devs[i]);
+	boot_time_value = xgpt_boot_up_time(); /*record the time when init GPT*/
 
-		setup_clksrc(freq);
-		setup_irq(xgpt_timers.tmr_irq, &gpt_irq);
-		setup_clkevt(freq);
+	pr_alert("mt_gpt_init: tmr_regs=0x%lx, tmr_irq=%d, freq=%d\n",
+		(unsigned long)xgpt_timers.tmr_regs, xgpt_timers.tmr_irq, freq);
+
+	gpt_devs_init();
+	for (i = 0; i < NR_GPTS; i++)
+		__gpt_reset(&gpt_devs[i]);
+
+	setup_clksrc(freq);
+	setup_irq(xgpt_timers.tmr_irq, &gpt_irq);
+	setup_clkevt(freq);
 
 	/* use cpuxgpt as syscnt */
 	setup_syscnt();
-	    pr_alert("mt_gpt_init: get_cnt_GPT2=%lld\n", mt_gpt_read(NULL)); /* /TODO: remove */
+	pr_alert("mt_gpt_init: get_cnt_GPT2=%lld\n", mt_gpt_read(NULL)); /* /TODO: remove */
 		gpt_update_unlock(save_flags);
 }
 

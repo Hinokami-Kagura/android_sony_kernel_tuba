@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -43,7 +56,7 @@
 #include <asm/uaccess.h>
 
 #include <mt-plat/upmu_common.h>
-#include <pmic.h>
+#include "pmic.h"
 /*#include <mach/eint.h> TBD*/
 #include <mach/mt_pmic_wrap.h>
 #include <mt-plat/mtk_rtc.h>
@@ -61,7 +74,7 @@
 #include <mt-plat/battery_common.h>
 #include <mach/mt_battery_meter.h>
 #endif
-#include <mt6311.h>
+#include "mt6311.h"
 #include <mach/mt_pmic.h>
 #include <mt-plat/mt_reboot.h>
 
@@ -98,7 +111,7 @@ static unsigned long timer_pos;
 #define PMICLOG(fmt, arg...)
 #endif
 */
-#ifdef CONFIG_ARM /* fix kpd build error only */
+#ifndef CONFIG_KEYBOARD_MTK /* fix kpd build error only */
 void kpd_pwrkey_pmic_handler(unsigned long pressed)
 {}
 void kpd_pmic_rstkey_handler(unsigned long pressed)
@@ -230,16 +243,11 @@ void pwrkey_int_handler_r(void)
 		PMICLOG
 		    ("timer_pos = %ld, timer_pre = %ld, timer_pos-timer_pre = %ld, long_pwrkey_press = %d\r\n",
 		     timer_pos, timer_pre, timer_pos - timer_pre, long_pwrkey_press);
-//CEI comment start//
-//For chgonly mode
-#if 0
 		if (long_pwrkey_press) {	/*500ms */
 			PMICLOG
 			    ("Power Key Pressed during kernel power off charging, reboot OS\r\n");
 			arch_reset(0, NULL);
 		}
-#endif
-//CEI comment end//
 	}
 #endif
 #if defined(CONFIG_MTK_FPGA)
@@ -482,35 +490,28 @@ struct wake_lock pmicThread_lock;
 
 void wake_up_pmic(void)
 {
-	PMICLOG("[wake_up_pmic]\r\n");
-	wake_up_process(pmic_thread_handle);
-
+	PMICLOG("[%s]\n", __func__);
+	if (pmic_thread_handle != NULL) {
 #if !defined CONFIG_HAS_WAKELOCKS
-	__pm_stay_awake(&pmicThread_lock);
+		__pm_stay_awake(&pmicThread_lock);
 #else
-	wake_lock(&pmicThread_lock);
+		wake_lock(&pmicThread_lock);
 #endif
+		wake_up_process(pmic_thread_handle);
+	} else {
+		pr_err(PMICTAG "[%s] pmic_thread_handle not ready\n", __func__);
+		return;
+	}
 }
 EXPORT_SYMBOL(wake_up_pmic);
 
-/*
-#ifdef CONFIG_MTK_LEGACY
-void mt_pmic_eint_irq(void)
-{
-	PMICLOG("[mt_pmic_eint_irq] receive interrupt\n");
-	wake_up_pmic();
-	return;
-}
-#else
-*/
 irqreturn_t mt_pmic_eint_irq(int irq, void *desc)
 {
-	/*PMICLOG("[mt_pmic_eint_irq] receive interrupt\n");*/
-	wake_up_pmic();
 	disable_irq_nosync(irq);
+	PMICLOG("[mt_pmic_eint_irq] disable PMIC irq\n");
+	wake_up_pmic();
 	return IRQ_HANDLED;
 }
-/*#endif*/
 
 void pmic_enable_interrupt(unsigned int intNo, unsigned int en, char *str)
 {
@@ -621,10 +622,10 @@ void PMIC_EINT_SETTING(void)
 		g_pmic_irq = irq_of_parse_and_map(node, 0);
 		ret = request_irq(g_pmic_irq, (irq_handler_t) mt_pmic_eint_irq, IRQF_TRIGGER_NONE, "pmic-eint", NULL);
 		if (ret > 0)
-			PMICLOG("EINT IRQ LINENNOT AVAILABLE\n");
-		enable_irq(g_pmic_irq);
+			pr_err(PMICTAG "EINT IRQ LINENNOT AVAILABLE\n");
+		enable_irq_wake(g_pmic_irq);
 	} else
-		PMICLOG("can't find compatible node\n");
+		pr_err(PMICTAG "can't find compatible node\n");
 
 	PMICLOG("[CUST_EINT] CUST_EINT_MT_PMIC_MT6325_NUM=%d\n", g_eint_pmic_num);
 	PMICLOG("[CUST_EINT] CUST_EINT_PMIC_DEBOUNCE_CN=%d\n", g_cust_eint_mt_pmic_debounce_cn);
@@ -642,7 +643,8 @@ static void pmic_int_handler(void)
 		unsigned int int_status_val = 0;
 
 		int_status_val = upmu_get_reg_value(interrupts[i].address);
-		PMICLOG("[PMIC_INT] addr[0x%x]=0x%x\n", interrupts[i].address, int_status_val);
+		if (int_status_val)
+			pr_err(PMICTAG "[PMIC_INT] addr[0x%x]=0x%x\n", interrupts[i].address, int_status_val);
 
 		for (j = 0; j < PMIC_INT_WIDTH; j++) {
 			if ((int_status_val) & (1 << j)) {
@@ -651,7 +653,7 @@ static void pmic_int_handler(void)
 					interrupts[i].interrupts[j].callback();
 					interrupts[i].interrupts[j].times++;
 				}
-				ret = pmic_config_interface(interrupts[i].address, 0x1, 0x1, j);
+				ret = pmic_config_interface(interrupts[i].address, 0x1 << j, 0xFFFF, 0);
 			}
 		}
 	}

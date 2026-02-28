@@ -11,41 +11,17 @@
  *
  */
 
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
-
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
 #include "uncali_maghub.h"
 #include <uncali_mag.h>
-#include <linux/hwmsen_helper.h>
-
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include <linux/batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
 
-
 #define UNMAGHUB_TAG                  "[uncali_maghub] "
-#define UNMAGHUB_FUN(f)               printk(UNMAGHUB_TAG"%s\n", __func__)
-#define UNMAGHUB_ERR(fmt, args...)    printk(UNMAGHUB_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
-#define UNMAGHUB_LOG(fmt, args...)    printk(UNMAGHUB_TAG fmt, ##args)
+#define UNMAGHUB_FUN(f)               pr_err(UNMAGHUB_TAG"%s\n", __func__)
+#define UNMAGHUB_ERR(fmt, args...)    pr_err(UNMAGHUB_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
+#define UNMAGHUB_LOG(fmt, args...)    pr_err(UNMAGHUB_TAG fmt, ##args)
 
 typedef enum {
 	UNMAGHUB_TRC_INFO = 0X10,
@@ -138,12 +114,13 @@ static int uncali_mag_get_data(int *dat, int *offset, int *status)
 	}
 	time_stamp = data.time_stamp;
 	time_stamp_gpt = data.time_stamp_gpt;
-	dat[0] = data.uncalibrated_mag_t.x_uncali;
-	dat[1] = data.uncalibrated_mag_t.y_uncali;
-	dat[2] = data.uncalibrated_mag_t.z_uncali;
+	dat[0] = data.uncalibrated_mag_t.x;
+	dat[1] = data.uncalibrated_mag_t.y;
+	dat[2] = data.uncalibrated_mag_t.z;
 	offset[0] = data.uncalibrated_mag_t.x_bias;
 	offset[1] = data.uncalibrated_mag_t.y_bias;
 	offset[2] = data.uncalibrated_mag_t.z_bias;
+	*status = data.uncalibrated_mag_t.status;
 	return 0;
 }
 static int uncali_mag_open_report_data(int open)
@@ -175,8 +152,8 @@ static int uncali_maghub_local_init(void)
 	ctl.open_report_data = uncali_mag_open_report_data;
 	ctl.enable_nodata = uncali_mag_enable_nodata;
 	ctl.set_delay = uncali_mag_set_delay;
-	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_report_input_direct = true;
+	ctl.is_support_batch = false;
 	err = uncali_mag_register_control_path(&ctl);
 	if (err) {
 		UNMAGHUB_ERR("register uncali_mag control path err\n");
@@ -184,10 +161,16 @@ static int uncali_maghub_local_init(void)
 	}
 
 	data.get_data = uncali_mag_get_data;
+	data.vender_div = 100;
 	err = uncali_mag_register_data_path(&data);
 	if (err) {
 		UNMAGHUB_ERR("register uncali_mag data path err\n");
 		goto exit;
+	}
+	err = batch_register_support_info(ID_MAGNETIC_UNCALIBRATED, ctl.is_support_batch, data.vender_div, 1);
+	if (err) {
+		UNMAGHUB_ERR("register magnetic batch support err = %d\n", err);
+		goto exit_create_attr_failed;
 	}
 	return 0;
 exit:

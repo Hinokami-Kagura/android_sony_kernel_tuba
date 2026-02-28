@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef ECCCI_INTERNAL_OPTION
 #define ECCCI_INTERNAL_OPTION
 /*================================================ */
@@ -19,7 +32,7 @@
 #define FEATURE_SEQ_CHECK_EN
 #define FEATURE_POLL_MD_EN
 
-#define FEATURE_DHL_LOG_EN
+#define FEATURE_SMART_LOGGING
 #define FEATURE_MD1MD3_SHARE_MEM
 
 #if 0 /*DEPRECATED */
@@ -53,16 +66,22 @@
 #define ENABLE_EMI_PROTECTION
 #ifdef ENABLE_EMI_PROTECTION
 #define SET_EMI_STEP_BY_STAGE
-/* #define SET_AP_MPU_REGION */ /*no need set ap region in Jade */
+/* #define SET_AP_MPU_REGION */ /*no need set ap region */
 #endif
 
 #endif
 /* #define DISABLE_MD_WDT_PROCESS */ /* enable wdt after bringup */
 #define NO_POWER_OFF_ON_STARTMD
 #define NO_START_ON_SUSPEND_RESUME
-#define MD_CACHE_TO_NONECACHE
 #define MD_UMOLY_EE_SUPPORT
 #define TEST_MESSAGE_FOR_BRINGUP
+
+#define FEATURE_MTK_SWITCH_TX_POWER
+#ifdef FEATURE_MTK_SWITCH_TX_POWER
+#define SWTP_COMPATIBLE_DEVICE_ID "mediatek, swtp-eint"
+#endif
+
+#define FEATURE_FORCE_ASSERT_CHECK_EN
 
 /*================================================ */
 /* misc size description */
@@ -70,6 +89,9 @@
 #define CCCC_SMEM_CCIF_SRAM_SIZE 16 /* SRAM size we dump into smem */
 #define CCCI_SMEM_SLEEP_MODE_DBG_DUMP 512 /* only dump first 512bytes in sleep mode info */
 #define CCCI_SMEM_DBM_GUARD_SIZE 8
+#define CCCI_SMEM_DBM_SIZE 40
+#define CCCI_SMEM_SIZE_RUNTIME_AP 0x800 /* AP runtime data size */
+#define CCCI_SMEM_SIZE_RUNTIME_MD 0x800 /* MD runtime data size */
 /*================================================*/
 /* share memory region description */
 #define CCCI_SMEM_OFFSET_EXCEPTION 0 /* offset in whole share memory region */
@@ -81,21 +103,31 @@
 #define CCCI_SMEM_OFFSET_CCIF_SRAM (CCCI_SMEM_OFFSET_MDSS_DEBUG+1024-CCCC_SMEM_CCIF_SRAM_SIZE)
 #define CCCI_SMEM_OFFSET_EPON (CCCI_SMEM_OFFSET_EXCEPTION+0xC64)
 #define CCCI_SMEM_OFFSET_EPON_UMOLY (CCCI_SMEM_OFFSET_EXCEPTION+0x1830)
+#define CCCI_SMEM_OFFSET_EPOF  (CCCI_SMEM_OFFSET_EXCEPTION+8*1024+31*4)
 #define CCCI_SMEM_OFFSET_SEQERR (CCCI_SMEM_OFFSET_EXCEPTION+0x34)
 #define CCCI_SMEM_SIZE_MDSS_DEBUG_UMOLY  8192 /* MD SS debug info size for MD1 after UMOLY */
 #define CCCI_SMEM_SIZE_MDSS_DEBUG 2048 /* MD SS debug info size except MD1 */
 #define CCCI_SMEM_SIZE_SLEEP_MODE_DBG 1024 /* MD sleep mode debug info section in exception region tail */
 #define CCCI_SMEM_OFFSET_SLEEP_MODE_DBG (CCCI_SMEM_OFFSET_EXCEPTION+CCCI_SMEM_SIZE_EXCEPTION \
 										-CCCI_SMEM_SIZE_SLEEP_MODE_DBG)
-#define CCCI_SMEM_OFFSET_MD1_DBM (CCCI_SMEM_OFFSET_EXCEPTION+(64*1024-16*3-8))
-#define CCCI_SMEM_OFFSET_MD3_DBM (CCCI_SMEM_OFFSET_EXCEPTION+(64*1024-16*3-8))
+
+#ifdef FEATURE_FORCE_ASSERT_CHECK_EN
+/* MD CCCI force assert debug info */
+#define CCCI_SMEM_FORCE_ASSERT_SIZE 1024
+#define CCCI_SMEM_OFFSET_FORCE_ASSERT (CCCI_SMEM_OFFSET_EXCEPTION + CCCI_SMEM_SIZE_EXCEPTION \
+						- CCCI_SMEM_FORCE_ASSERT_SIZE - CCCI_SMEM_SIZE_SLEEP_MODE_DBG)
+#endif
+#define CCCI_SMEM_OFFSET_DBM_DEBUG (CCCI_SMEM_OFFSET_EXCEPTION + CCCI_SMEM_SIZE_EXCEPTION \
+						- CCCI_SMEM_DBM_SIZE - CCCI_SMEM_DBM_GUARD_SIZE*2)
 /*== subset of exception region ends ==*/
 #define CCCI_SMEM_OFFSET_RUNTIME (CCCI_SMEM_OFFSET_EXCEPTION+CCCI_SMEM_SIZE_EXCEPTION)
-#define CCCI_SMEM_SIZE_RUNTIME_AP 0x800 /* AP runtime data size */
-#define CCCI_SMEM_SIZE_RUNTIME_MD 0x800 /* MD runtime data size */
 #define CCCI_SMEM_SIZE_RUNTIME	(CCCI_SMEM_SIZE_RUNTIME_AP+CCCI_SMEM_SIZE_RUNTIME_MD)
+
+#define CCCI_SMEM_OFFSET_SMART_LOGGING (CCCI_SMEM_OFFSET_RUNTIME+CCCI_SMEM_SIZE_RUNTIME) /*APM->MD1*/
+#define CCCI_SMEM_SIZE_SMART_LOGGING 0 /* variable, so it should be the last region for MD1 */
+
 #define CCCI_SMEM_OFFSET_CCIF_SMEM (CCCI_SMEM_OFFSET_RUNTIME+CCCI_SMEM_SIZE_RUNTIME) /*AP<->MD3*/
-#define CCCI_SMEM_SIZE_CCIF_SMEM 0x0 /* variable, so it should be the last region for MD3 */
+#define CCCI_SMEM_SIZE_CCIF_SMEM 0 /* variable, so it should be the last region for MD3 */
 /*================================================ */
 
 /*================================================ */
@@ -122,5 +154,5 @@
 
 #define IPC_L4C_MSG_ID_LEN   (0x40)
 
-#define CCCI_LOG_LEVEL  (0)
+#define CCCI_LOG_LEVEL  (4)
 #endif

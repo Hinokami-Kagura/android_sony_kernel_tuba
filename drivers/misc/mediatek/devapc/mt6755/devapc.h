@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _DAPC_H
 #define _DAPC_H
 #include <linux/types.h>
@@ -38,6 +51,9 @@
 /*For EMI_MPU(APB violation) API DEVAPC0_D0_VIO_STA_5, idx:166*/
 #define ABORT_EMI_MPU            0x00000040
 #define INDEX_EMI_MPU            166
+
+#define DAPC_INPUT_TYPE_DEBUG_ON	200
+#define DAPC_INPUT_TYPE_DEBUG_OFF	100
 
 /*Define constants*/
 

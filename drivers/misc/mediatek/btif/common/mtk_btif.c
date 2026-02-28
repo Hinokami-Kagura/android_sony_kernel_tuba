@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*-----------linux system header files----------------*/
 
 #include <linux/module.h>
@@ -308,10 +321,10 @@ static int mtk_btif_suspend(struct platform_device *pdev, pm_message_t state)
 	p_mtk_btif p_btif = NULL;
 
 /*Chaozhong: ToDo: to be implement*/
-	BTIF_INFO_FUNC("++\n");
+	BTIF_DBG_FUNC("++\n");
 	p_btif = platform_get_drvdata(pdev);
 	i_ret = _btif_suspend(p_btif);
-	BTIF_INFO_FUNC("--, i_ret:%d\n", i_ret);
+	BTIF_DBG_FUNC("--, i_ret:%d\n", i_ret);
 	return i_ret;
 }
 
@@ -402,10 +415,10 @@ static int mtk_btif_resume(struct platform_device *pdev)
 	int i_ret = 0;
 	p_mtk_btif p_btif = NULL;
 /*Chaozhong: ToDo: to be implement*/
-	BTIF_INFO_FUNC("++\n");
+	BTIF_DBG_FUNC("++\n");
 	p_btif = platform_get_drvdata(pdev);
 	i_ret = _btif_resume(p_btif);
-	BTIF_INFO_FUNC("--, i_ret:%d\n", i_ret);
+	BTIF_DBG_FUNC("--, i_ret:%d\n", i_ret);
 	return 0;
 }
 
@@ -2911,12 +2924,12 @@ int btif_dump_data(char *p_buf, int len)
 {
 	unsigned int idx = 0;
 
+	pr_debug("  ");
 	for (idx = 0; idx < len; idx++, p_buf++) {
-		pr_debug("%02x ", *p_buf);
+		pr_cont("%02x ", *p_buf);
 		if (7 == (idx % 8))
-			pr_debug("\n");
+			pr_debug("  ");
 	}
-	pr_debug("\n");
 	return 0;
 }
 
@@ -3281,6 +3294,7 @@ static int BTIF_init(void)
 			BTIF_ERR_FUNC("BTIF Rx vFIFO allocation failed\n");
 			goto err_exit2;
 		}
+
 #if !(MTK_BTIF_ENABLE_CLK_REF_COUNTER)
 /*enable BTIF Tx DMA channel's clock gating by default*/
 		i_ret = hal_btif_dma_clk_ctrl(p_rx_dma->p_dma_info,

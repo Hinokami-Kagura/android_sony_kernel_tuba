@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <generated/autoconf.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -58,6 +71,8 @@
  * PMIC-AUXADC global variable
  */
 
+#define PMIC_DEBUG_PR_DBG
+
 #define PMICTAG                "[Auxadc] "
 #if defined PMIC_DEBUG_PR_DBG
 #define PMICLOG2(fmt, arg...)   pr_err(PMICTAG fmt, ##arg)
@@ -69,6 +84,7 @@ signed int count_time_out = 15;
 struct wake_lock pmicAuxadc_irq_lock;
 /*static DEFINE_SPINLOCK(pmic_adc_lock);*/
 static DEFINE_MUTEX(pmic_adc_mutex);
+static DEFINE_MUTEX(auxadc_ch3_mutex);
 
 void pmic_auxadc_init(void)
 {
@@ -83,6 +99,16 @@ void pmic_auxadc_init(void)
 	pmic_set_register_value(PMIC_AUXADC_VBUF_EN, 0x1);
 
 	PMICLOG2("****[pmic_auxadc_init] DONE\n");
+}
+
+void lockadcch3(void)
+{
+	mutex_lock(&auxadc_ch3_mutex);
+}
+
+void unlockadcch3(void)
+{
+	mutex_unlock(&auxadc_ch3_mutex);
 }
 
 void pmic_auxadc_lock(void)
@@ -261,6 +287,10 @@ unsigned int PMIC_IMM_GetOneChannelValue(pmic_adc_ch_list_enum dwChannel, int de
 #endif
 	wake_lock(&pmicAuxadc_irq_lock);
 	mutex_lock(&pmic_adc_mutex);
+
+
+	if (dwChannel == 3)
+		mutex_lock(&auxadc_ch3_mutex);
 	/*ret=pmic_config_interface(MT6351_TOP_CLKSQ_SET,(1<<2),0xffff,0); */
 	ret = pmic_config_interface(MT6351_AUXADC_RQST0_SET, (1 << dwChannel), 0xffff, 0);
 
@@ -320,8 +350,9 @@ unsigned int PMIC_IMM_GetOneChannelValue(pmic_adc_ch_list_enum dwChannel, int de
 			pr_err("[AUXADC]VBIF28_ON_CTL, EN(%x, %x)\n",
 				pmic_get_register_value(PMIC_RG_VBIF28_ON_CTRL),
 				pmic_get_register_value(PMIC_RG_VBIF28_EN));
-				pmic_auxadc_debug(0x22);
+			pmic_auxadc_debug(0x22);
 		}
+		mutex_unlock(&auxadc_ch3_mutex);
 		break;
 	case 4:
 		while (pmic_get_register_value(PMIC_AUXADC_ADC_RDY_CH4) != 1) {

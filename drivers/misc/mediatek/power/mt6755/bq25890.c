@@ -1,41 +1,16 @@
-#if 0
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
 
-#include <cust_acc.h>
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
-#include <linux/hwmsen_helper.h>
-#include <linux/xlog.h>
-
-#include <mt-plat/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include "bq25890.h"
-#include <mach/mt_charging.h>
-#include <mt-plat/charging.h>
-
-#if defined(CONFIG_MTK_FPGA)
-#else
-#ifdef CONFIG_OF
-#else
-#include <cust_i2c.h>
-#endif
-#endif
-#endif
 #include <linux/types.h>
 #include <linux/init.h>		/* For init/exit macros */
 #include <linux/module.h>	/* For MODULE_ marcros  */
@@ -50,6 +25,7 @@
 #endif
 #include <mach/mt_charging.h>
 #include <mt-plat/charging.h>
+#include <mt-plat/battery_common.h>
 #include "bq25890.h"
 /**********************************************************
   *
@@ -85,6 +61,7 @@ static int bq25890_driver_probe(struct i2c_client *client, const struct i2c_devi
 unsigned char bq25890_reg[bq25890_REG_NUM] = { 0 };
 
 static DEFINE_MUTEX(bq25890_i2c_access);
+static DEFINE_MUTEX(bq25890_access_mutex);
 
 int g_bq25890_hw_exist = 0;
 
@@ -178,7 +155,7 @@ unsigned int bq25890_read_byte(unsigned char cmd, unsigned char *returnData)
 		 * Avoid sending the segment addr to not upset non-compliant
 		 * DDC monitors.
 		 */
-		ret = i2c_transfer(new_client->adapter, &msgs[xfers], xfers);
+		ret = i2c_transfer(new_client->adapter, msgs, xfers);
 
 		if (ret == -ENXIO) {
 			battery_log(BAT_LOG_CRTI, "skipping non-existent adapter %s\n", new_client->adapter->name);
@@ -188,7 +165,7 @@ unsigned int bq25890_read_byte(unsigned char cmd, unsigned char *returnData)
 
 	mutex_unlock(&bq25890_i2c_access);
 
-	return ret == xfers ? 0 : -1;
+	return ret == xfers ? 1 : -1;
 }
 
 unsigned int bq25890_write_byte(unsigned char cmd, unsigned char writeData)
@@ -216,7 +193,7 @@ unsigned int bq25890_write_byte(unsigned char cmd, unsigned char writeData)
 		 * Avoid sending the segment addr to not upset non-compliant
 		 * DDC monitors.
 		 */
-		ret = i2c_transfer(new_client->adapter, &msgs[xfers], xfers);
+		ret = i2c_transfer(new_client->adapter, msgs, xfers);
 
 		if (ret == -ENXIO) {
 			battery_log(BAT_LOG_CRTI, "skipping non-existent adapter %s\n", new_client->adapter->name);
@@ -226,7 +203,7 @@ unsigned int bq25890_write_byte(unsigned char cmd, unsigned char writeData)
 
 	mutex_unlock(&bq25890_i2c_access);
 
-	return ret == xfers ? 0 : -1;
+	return ret == xfers ? 1 : -1;
 }
 #endif
 /**********************************************************
@@ -234,11 +211,9 @@ unsigned int bq25890_write_byte(unsigned char cmd, unsigned char writeData)
   *   [Read / Write Function]
   *
   *********************************************************/
-
-//CEI comment start//
+  //CEI comment start//
 extern int Enable_BATDRV_LOG;
 //CEI comment end//
-
 unsigned int bq25890_read_interface(unsigned char RegNum, unsigned char *val, unsigned char MASK,
 				  unsigned char SHIFT)
 {
@@ -259,7 +234,6 @@ unsigned int bq25890_read_interface(unsigned char RegNum, unsigned char *val, un
 		dump_stack();
 //CEI comment end//
 
-
 	return ret;
 }
 
@@ -270,6 +244,7 @@ unsigned int bq25890_config_interface(unsigned char RegNum, unsigned char val, u
 	unsigned char bq25890_reg_ori = 0;
 	unsigned int ret = 0;
 
+	mutex_lock(&bq25890_access_mutex);
 	ret = bq25890_read_byte(RegNum, &bq25890_reg);
 
 	bq25890_reg_ori = bq25890_reg;
@@ -277,17 +252,18 @@ unsigned int bq25890_config_interface(unsigned char RegNum, unsigned char val, u
 	bq25890_reg |= (val << SHIFT);
 
 	ret = bq25890_write_byte(RegNum, bq25890_reg);
+	mutex_unlock(&bq25890_access_mutex);
 	battery_log(BAT_LOG_FULL, "[bq25890_config_interface] write Reg[%x]=0x%x from 0x%x\n", RegNum,
 		    bq25890_reg, bq25890_reg_ori);
+
+	/* Check */
+	/* bq25890_read_byte(RegNum, &bq25890_reg); */
+	/* printk("[bq25890_config_interface] Check Reg[%x]=0x%x\n", RegNum, bq25890_reg); */
 
 //CEI comment start//
 	if(Enable_BATDRV_LOG == BAT_LOG_DEBG)
 		dump_stack();
 //CEI comment end//
-
-	/* Check */
-	/* bq25890_read_byte(RegNum, &bq25890_reg); */
-	/* printk("[bq25890_config_interface] Check Reg[%x]=0x%x\n", RegNum, bq25890_reg); */
 
 	return ret;
 }
@@ -546,8 +522,8 @@ void bq25890_set_vreg(unsigned int val)
 
 	ret = bq25890_config_interface((unsigned char) (bq25890_CON6),
 				       (unsigned char) (val),
-				       (unsigned char) (CON6_2XTMR_EN_MASK),
-				       (unsigned char) (CON6_2XTMR_EN_SHIFT)
+				       (unsigned char) (CON6_VREG_MASK),
+				       (unsigned char) (CON6_VREG_SHIFT)
 	    );
 }
 
@@ -558,11 +534,10 @@ unsigned int bq25890_get_vreg(void)
 
 	ret = bq25890_read_interface((unsigned char) (bq25890_CON6),
 				     (&val),
-				     (unsigned char) (CON6_2XTMR_EN_MASK), (unsigned char) (CON6_2XTMR_EN_SHIFT)
+				     (unsigned char) (CON6_VREG_MASK), (unsigned char) (CON6_VREG_SHIFT)
 	    );
 	return val;
 }
-
 
 void bq25890_set_batlowv(unsigned int val)
 {
@@ -633,6 +608,19 @@ void bq25890_en_chg_timer(unsigned int val)
 	    );
 }
 
+unsigned int bq25890_get_chg_timer_enable(void)
+{
+	unsigned int ret = 0;
+	unsigned char val = 0;
+
+	ret = bq25890_read_interface((unsigned char) (bq25890_CON7),
+				     &val,
+				     (unsigned char) (CON7_EN_TIMER_MASK),
+				     (unsigned char) (CON7_EN_TIMER_SHIFT));
+
+	return val;
+}
+
 void bq25890_set_chg_timer(unsigned int val)
 {
 	unsigned int ret = 0;
@@ -681,11 +669,11 @@ void bq25890_set_VBAT_IR_compensation(unsigned int val)
 //CEI comment start//
 //JEITA enable
 unsigned int check_if_jeita_current_limit(void);
-
-//Alien battery support
-extern int battery_id_invalid;
 //CEI comment end//
 
+//Alien_battery support
+extern int battery_id_invalid;
+//CEI comment end//
 
 void bq25890_pumpx_up(unsigned int val)
 {
@@ -710,29 +698,29 @@ void bq25890_pumpx_up(unsigned int val)
 					       (unsigned char) (CON9_PUMPX_DN_SHIFT)
 		    );
 	}
-/* Input current limit = 800 mA, changes after port detection*/
-	bq25890_set_iinlim(0x14);
-/* CC mode current = 2048 mA*/
+
+	/* Input current limit = 500 mA, changes after PE+ detection */
+	bq25890_set_iinlim(0x08);
+
+	/* CC mode current = 2048 mA */
 //CEI comment start//
 //JEITA enable
 #if !defined(CONFIG_MTK_JEITA_STANDARD_SUPPORT)
 	bq25890_set_ichg(0x20);
 #else
 	jeita_current = check_if_jeita_current_limit();
-//Alien battery suport
+	if(jeita_current == 0)
+		bq25890_set_ichg(0x0);
+	else if(jeita_current == 67500)
+		bq25890_set_ichg(0x0a);
+	else if(jeita_current == 185600)
+		bq25890_set_ichg(0x1d);
+	else
+		bq25890_set_ichg(0x1d);
+
+//Alien_battery suport
 	if ((jeita_current > 50000) && (battery_id_invalid == 1))
 		bq25890_set_ichg(0x7);
-	else
-	{
-		if(jeita_current == 0)
-			bq25890_set_ichg(0x0);
-		else if(jeita_current == 67500)
-			bq25890_set_ichg(0x0a);
-		else if(jeita_current == 185600)
-			bq25890_set_ichg(0x1d);
-		else
-			bq25890_set_ichg(0x1d);
-	}
 #endif
 //CEI comment end//
 
@@ -750,12 +738,16 @@ void bq25890_set_force_ico(void)
 	    );
 }
 
-
-
 /* CONA---------------------------------------------------- */
 void bq25890_set_boost_ilim(unsigned int val)
 {
 	unsigned int ret = 0;
+
+	ret = bq25890_config_interface((unsigned char) (bq25890_CONA),
+				       (unsigned char) (9),
+				       (unsigned char) (CONA_BOOST_VLIM_MASK),
+				       (unsigned char) (CONA_BOOST_VLIM_SHIFT)
+	    );
 
 	ret = bq25890_config_interface((unsigned char) (bq25890_CONA),
 				       (unsigned char) (val),
@@ -901,7 +893,7 @@ unsigned int bq25890_get_bat_state(void)
 
 
 /* COND */
-void bq25890_set_FORCE_VINDPM(unsigned int val)
+void bq25890_set_force_vindpm(unsigned int val)
 {
 	unsigned int ret = 0;
 
@@ -912,7 +904,7 @@ void bq25890_set_FORCE_VINDPM(unsigned int val)
 	    );
 }
 
-void bq25890_set_VINDPM(unsigned int val)
+void bq25890_set_vindpm(unsigned int val)
 {
 	unsigned int ret = 0;
 
@@ -921,6 +913,19 @@ void bq25890_set_VINDPM(unsigned int val)
 				       (unsigned char) (COND_VINDPM_MASK),
 				       (unsigned char) (COND_VINDPM_SHIFT)
 	    );
+}
+
+unsigned int bq25890_get_vindpm(void)
+{
+	int ret = 0;
+	unsigned char val = 0;
+
+
+	ret = bq25890_read_interface((unsigned char) (bq25890_COND),
+				     (&val),
+				     (unsigned char) (COND_VINDPM_MASK),
+				     (unsigned char) (COND_VINDPM_SHIFT));
+	return val;
 }
 
 /* CONDE */
@@ -1038,8 +1043,30 @@ void bq25890_dump_register(void)
 	unsigned char vdpm = 0;
 	unsigned char fault = 0;
 
+//CEI comment start//
+#if 0 //MTK ORG
+	if (Enable_BATDRV_LOG == BAT_LOG_FULL) {
+		bq25890_ADC_start(1);
+		for (i = 0; i < bq25890_REG_NUM; i++)
+			bq25890_read_byte(i, &bq25890_reg[i]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0x0]=0x%x [0x1]=0x%x [0x2]=0x%x [0x3]=0x%x [0x4]=0x%x [0x5]=0x%x\n",
+		bq25890_reg[0], bq25890_reg[0x1], bq25890_reg[0x2], bq25890_reg[0x3],
+		bq25890_reg[0x4], bq25890_reg[0x5]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0x6]=0x%x [0x7]=0x%x [0x8]=0x%x [0x9]=0x%x [0xa]=0x%x [0xb]=0x%x\n",
+		bq25890_reg[0x6], bq25890_reg[0x7], bq25890_reg[0x8], bq25890_reg[0x9],
+		bq25890_reg[0xa], bq25890_reg[0xb]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0xc]=0x%x [0xd]=0x%x [0xe]=0x%x [0xf]=0x%x [0x10]=0x%x [0x11]=0x%x\n",
+		bq25890_reg[0xc], bq25890_reg[0xd], bq25890_reg[0xe], bq25890_reg[0xf],
+		bq25890_reg[0x10], bq25890_reg[0x11]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0x11]=0x%x [0x12]=0x%x [0x13]=0x%x [0x14]=0x%x\n",
+		bq25890_reg[0x11], bq25890_reg[0x12], bq25890_reg[0x13], bq25890_reg[0x14]);
+	}
+#else
 	bq25890_ADC_start(1);
-//CEI comment start//	
 	for (i = 0; i < bq25890_REG_NUM/7; i++) {
 		int j;
 		unsigned char bq25890_reg_buf[7];
@@ -1050,11 +1077,12 @@ void bq25890_dump_register(void)
 		}
 
 		battery_log(BAT_LOG_CRTI, "LE(K)=> [bq25890 reg@][0x%x]=0x%x [0x%x]=0x%x [0x%x]=0x%x [0x%x]=0x%x [0x%x]=0x%x [0x%x]=0x%x [0x%x]=0x%x\n",
-					(i*7)+0, bq25890_reg_buf[0], (i*7)+1, bq25890_reg_buf[1], (i*7)+2, bq25890_reg_buf[2], 
+					(i*7)+0, bq25890_reg_buf[0], (i*7)+1, bq25890_reg_buf[1], (i*7)+2, bq25890_reg_buf[2],
 					(i*7)+3, bq25890_reg_buf[3], (i*7)+4, bq25890_reg_buf[4], (i*7)+5, bq25890_reg_buf[5],
-					(i*7)+6, bq25890_reg_buf[6]);		
+					(i*7)+6, bq25890_reg_buf[6]);
 	}
-//CEI comment end//	
+#endif
+
 	bq25890_ADC_start(1);
 	iinlim = bq25890_get_iinlim();
 	chrg_state = bq25890_get_chrg_state();
@@ -1065,11 +1093,12 @@ void bq25890_dump_register(void)
 	vbus = bq25890_get_vbus();
 	vdpm = bq25890_get_vdpm_state();
 	fault = bq25890_get_chrg_fault_state();
+//CEI comment start//
 	battery_log(BAT_LOG_CRTI,
-		    "[PE+]BQ25896 Ichg_reg=%d mA, Iinlin=%d mA, Vbus=%d mV, err=%d",
-		     ichg_reg * 64, iinlim * 50 + 100, vbus * 100 + 2600, fault);
-	battery_log(BAT_LOG_CRTI, "[PE+]BQ25896 Ichg=%d mA, Vbat =%d mV, ChrStat=%d, CHGEN=%d, VDPM=%d\n",
+	"[PE+]LE(K)=> Ibat=%d, Ilim=%d, Vbus=%d, err=%d, Ichg=%d, Vbat=%d, ChrStat=%d, CHGEN=%d, VDPM=%d\n",
+	ichg_reg * 64, iinlim * 50 + 100, vbus * 100 + 2600, fault,
 		    ichg * 50, vbat * 20 + 2304, chrg_state, chr_en, vdpm);
+//CEI comment end//
 
 }
 
@@ -1087,8 +1116,30 @@ unsigned int bq25890_dump_register_get_data(void)
 	unsigned char fault = 0;
 	unsigned int bq_ibat = 0;
 
+//CEI comment start//
+#if 0 //MTK ORG
+	if (Enable_BATDRV_LOG == BAT_LOG_FULL) {
+		bq25890_ADC_start(1);
+		for (i = 0; i < bq25890_REG_NUM; i++)
+			bq25890_read_byte(i, &bq25890_reg[i]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0x0]=0x%x [0x1]=0x%x [0x2]=0x%x [0x3]=0x%x [0x4]=0x%x [0x5]=0x%x\n",
+		bq25890_reg[0], bq25890_reg[0x1], bq25890_reg[0x2], bq25890_reg[0x3],
+		bq25890_reg[0x4], bq25890_reg[0x5]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0x6]=0x%x [0x7]=0x%x [0x8]=0x%x [0x9]=0x%x [0xa]=0x%x [0xb]=0x%x\n",
+		bq25890_reg[0x6], bq25890_reg[0x7], bq25890_reg[0x8], bq25890_reg[0x9],
+		bq25890_reg[0xa], bq25890_reg[0xb]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0xc]=0x%x [0xd]=0x%x [0xe]=0x%x [0xf]=0x%x [0x10]=0x%x [0x11]=0x%x\n",
+		bq25890_reg[0xc], bq25890_reg[0xd], bq25890_reg[0xe], bq25890_reg[0xf],
+		bq25890_reg[0x10], bq25890_reg[0x11]);
+	battery_log(BAT_LOG_CRTI,
+		"[bq25890 reg@][0x11]=0x%x [0x12]=0x%x [0x13]=0x%x [0x14]=0x%x\n",
+		bq25890_reg[0x11], bq25890_reg[0x12], bq25890_reg[0x13], bq25890_reg[0x14]);
+	}
+#else
 	bq25890_ADC_start(1);
-
 	for (i = 0; i < bq25890_REG_NUM/7; i++) {
 		int j;
 		unsigned char bq25890_reg_buf[7];
@@ -1103,6 +1154,7 @@ unsigned int bq25890_dump_register_get_data(void)
 					(i*7)+3, bq25890_reg_buf[3], (i*7)+4, bq25890_reg_buf[4], (i*7)+5, bq25890_reg_buf[5],
 					(i*7)+6, bq25890_reg_buf[6]);
 	}
+#endif
 
 	bq25890_ADC_start(1);
 	iinlim = bq25890_get_iinlim();
@@ -1114,17 +1166,18 @@ unsigned int bq25890_dump_register_get_data(void)
 	vbus = bq25890_get_vbus();
 	vdpm = bq25890_get_vdpm_state();
 	fault = bq25890_get_chrg_fault_state();
+//CEI comment start//
 	battery_log(BAT_LOG_CRTI,
-		    "[PE+]BQ25896 Ichg_reg=%d mA, Iinlin=%d mA, Vbus=%d mV, err=%d",
-		     ichg_reg * 64, iinlim * 50 + 100, vbus * 100 + 2600, fault);
-	battery_log(BAT_LOG_CRTI, "[PE+]BQ25896 Ichg=%d mA, Vbat =%d mV, ChrStat=%d, CHGEN=%d, VDPM=%d\n",
+	"[PE+]LE(K)=> Ibat=%d, Ilim=%d, Vbus=%d, err=%d, Ichg=%d, Vbat=%d, ChrStat=%d, CHGEN=%d, VDPM=%d\n",
+	ichg_reg * 64, iinlim * 50 + 100, vbus * 100 + 2600, fault,
 		    ichg * 50, vbat * 20 + 2304, chrg_state, chr_en, vdpm);
+//CEI comment end//
 
 	bq_ibat = ichg * 50;
 
 	return bq_ibat;
-}
 
+}
 
 void bq25890_hw_init(void)
 {
@@ -1134,15 +1187,7 @@ void bq25890_hw_init(void)
 
 static int bq25890_driver_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
-	int err = 0;
-
 	battery_log(BAT_LOG_CRTI, "[bq25890_driver_probe]\n");
-	new_client = kmalloc(sizeof(struct i2c_client), GFP_KERNEL);
-	if (!new_client) {
-		err = -ENOMEM;
-		goto exit;
-	}
-	memset(new_client, 0, sizeof(struct i2c_client));
 
 	new_client = client;
 
@@ -1152,11 +1197,9 @@ static int bq25890_driver_probe(struct i2c_client *client, const struct i2c_devi
 	/* bq25890_hw_init(); //move to charging_hw_xxx.c */
 	chargin_hw_init_done = true;
 
+	/* Hook chr_control_interface with battery's interface */
+	battery_charging_control = chr_control_interface;
 	return 0;
-
-exit:
-	return err;
-
 }
 
 /**********************************************************
@@ -1175,25 +1218,26 @@ static ssize_t store_bq25890_access(struct device *dev, struct device_attribute 
 				    const char *buf, size_t size)
 {
 	int ret = 0;
-	/*char *pvalue = NULL;*/
+	char *pvalue = NULL, *addr, *val;
 	unsigned int reg_value = 0;
-	unsigned long int reg_address = 0;
-	int rv;
+	unsigned int reg_address = 0;
 
 	battery_log(BAT_LOG_CRTI, "[store_bq25890_access]\n");
 
 	if (buf != NULL && size != 0) {
 		battery_log(BAT_LOG_CRTI, "[store_bq25890_access] buf is %s and size is %zu\n", buf,
 			    size);
-		/*reg_address = simple_strtoul(buf, &pvalue, 16);*/
-		rv = kstrtoul(buf, 0, &reg_address);
-			if (rv != 0)
-				return -EINVAL;
-		/*ret = kstrtoul(buf, 16, reg_address); *//* This must be a null terminated string */
+
+		pvalue = (char *)buf;
 		if (size > 3) {
-			/*NEED to check kstr*/
-			/*reg_value = simple_strtoul((pvalue + 1), NULL, 16);*/
-			/*ret = kstrtoul(buf + 3, 16, reg_value); */
+			addr = strsep(&pvalue, " ");
+			ret = kstrtou32(addr, 16, (unsigned int *)&reg_address);
+		} else
+			ret = kstrtou32(pvalue, 16, (unsigned int *)&reg_address);
+
+		if (size > 3) {
+			val = strsep(&pvalue, " ");
+			ret = kstrtou32(val, 16, (unsigned int *)&reg_value);
 			battery_log(BAT_LOG_CRTI,
 				    "[store_bq25890_access] write bq25890 reg 0x%x with value 0x%x !\n",
 				    (unsigned int) reg_address, reg_value);

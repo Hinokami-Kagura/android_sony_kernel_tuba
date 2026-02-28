@@ -1,5 +1,18 @@
 /*
- * Driver for EEPROM
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
+/*
+ * Driver for CAM_CAL
  *
  *
  */
@@ -19,8 +32,9 @@
 #include <asm/system.h>  /* for SMP */
 #else
 
-
+#ifndef CONFIG_MTK_I2C_EXTENSION
 #define CONFIG_MTK_I2C_EXTENSION
+#endif
 #include <linux/i2c.h>
 #undef CONFIG_MTK_I2C_EXTENSION
 #include <linux/platform_device.h>
@@ -36,7 +50,7 @@
 /*#include <asm/system.h>//for SMP*/
 #endif
 /* #define EEPROMGETDLT_DEBUG */
-#define EEPROM_DEBUG
+/*#define EEPROM_DEBUG*/
 #ifdef EEPROM_DEBUG
 #define EEPROMDB pr_debug
 #else
@@ -328,6 +342,8 @@ static int iReadDataFromGT24c32a(unsigned int  ui4_offset, unsigned int  ui4_len
 
 	return 0;
 }
+#endif
+
 
 static int iReadData(unsigned int  ui4_offset, unsigned int  ui4_length, unsigned char *pinputdata)
 {
@@ -339,7 +355,7 @@ static int iReadData(unsigned int  ui4_offset, unsigned int  ui4_length, unsigne
 	/* EEPROMDB("[S24EEPORM] iReadData\n" ); */
 
 	if (ui4_offset + ui4_length >= 0x2000) {
-		EEPROMDB("[GT24c32a] Read Error!! S-24CS64A not supprt address >= 0x2000!!\n");
+		EEPROMDB("[GT24c32a] Read Error!! GT24c32a not supprt address >= 0x2000!!\n");
 		return -1;
 	}
 
@@ -375,14 +391,14 @@ static int iReadData(unsigned int  ui4_offset, unsigned int  ui4_length, unsigne
 	/* EEPROMDB("[S24EEPORM] iReadData done\n" ); */
 	return 0;
 }
-#endif
+
 
 
 unsigned int gt24c32a_selective_read_region(struct i2c_client *client, unsigned int addr,
 	unsigned char *data, unsigned int size)
 {
 	g_pstI2Cclient = client;
-	if (iReadEEPROM(addr, size, data) == 0)
+	if (iReadData(addr, size, data) == 0)
 		return size;
 	else
 		return 0;

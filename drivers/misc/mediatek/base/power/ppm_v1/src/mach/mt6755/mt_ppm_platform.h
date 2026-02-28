@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 
 #ifndef __MT_PPM_PLATFORM_H__
 #define __MT_PPM_PLATFORM_H__
@@ -13,6 +26,13 @@ extern "C" {
 /*==============================================================*/
 /* ppm driver update state to MET directly  0: turn off */
 #define PPM_UPDATE_STATE_DIRECT_TO_MET  (1)
+
+#ifdef CONFIG_MTK_PMIC_CHIP_MT6353
+#define PPM_IC_SEGMENT_CHECK		(1)
+#define PPM_VPROC_5A_LIMIT_CHECK	(1)
+#define PPM_5A_LIMIT_FREQ_IDX		(1)
+#endif
+
 #define PPM_HW_OCP_SUPPORT		(0)
 #define PPM_DLPT_ENHANCEMENT		(0)
 
@@ -20,7 +40,6 @@ extern "C" {
 #define PPM_DLPT_DEFAULT_MODE	(SW_MODE)
 #define DLPT_MAX_REAL_POWER_FY	(3890)
 #define DLPT_MAX_REAL_POWER_SB	(4992)
-
 #define	LCMOFF_MIN_FREQ		(598000)
 #define	PTPOD_FREQ_IDX		(3)
 #define SUSPEND_FREQ_LL		(689000)
@@ -43,6 +62,9 @@ extern "C" {
 #define get_cluster_ptpod_fix_freq_idx(id)	PTPOD_FREQ_IDX	/* the same for each cluster */
 #define get_cluster_suspend_fix_freq(id)	\
 	((id == 0) ? SUSPEND_FREQ_LL : SUSPEND_FREQ_L)
+#define get_max_real_power_by_segment(seg)	\
+	((ppm_main_info.dvfs_tbl_type == DVFS_TABLE_TYPE_SB) ? DLPT_MAX_REAL_POWER_SB	\
+	: DLPT_MAX_REAL_POWER_FY)
 
 /*==============================================================*/
 /* Enum								*/
@@ -82,6 +104,9 @@ struct ppm_power_tbl_data {
 /*==============================================================*/
 /* APIs								*/
 /*==============================================================*/
+#ifdef PPM_IC_SEGMENT_CHECK
+extern enum ppm_power_state ppm_check_fix_state_by_segment(void);
+#endif
 
 #ifdef __cplusplus
 }

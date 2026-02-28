@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -647,7 +660,7 @@ static int mpu_check_violation(void)
 #ifdef CONFIG_MTK_AEE_FEATURE
 	if (wr_vio != 0) {
 		/* EMI violation is relative to MD at user build*/
-		#ifndef CONFIG_MT_ENG_BUILD
+		#if 0 /* #ifndef CONFIG_MT_ENG_BUILD */
 			if (((master_ID & 0x7) == MASTER_MDMCU) ||
 				((master_ID & 0x7) == MASTER_MDHW)) {
 					int md_id = 0;
@@ -656,10 +669,27 @@ static int mpu_check_violation(void)
 					ID_FORCE_MD_ASSERT, NULL, 0);
 					pr_err("[EMI MPU] MPU violation trigger MD\n");
 				}
+		#else
+			if (((master_ID & 0x7) == MASTER_MDMCU) ||
+				((master_ID & 0x7) == MASTER_MDHW)) {
+					char str[60] = "0";
+					char *pstr = str;
+
+					sprintf(pstr, "EMI_MPUS = 0x%x, ADDR = 0x%x",
+						dbg_s, dbg_t + emi_physical_offset);
+
+					exec_ccci_kern_func_by_md_id(0,
+					ID_MD_MPU_ASSERT, str, strlen(str));
+					pr_err("[EMI MPU] MPU violation trigger MD str=%s strlen(str)=%d\n"
+					, str, (int)strlen(str));
+				} else {
+					exec_ccci_kern_func_by_md_id(0,
+					ID_MD_MPU_ASSERT, NULL, 0);
+					pr_err("[EMI MPU] MPU violation ack to MD\n");
+					}
 		#endif
 		if ((region == 0) && (mt_emi_reg_read(EMI_MPUA) == 0)
-			&& (mt_emi_reg_read(EMI_MPUI) == 0)
-			&& (!(dbg_pqry & OOR_VIO))) {
+			&& (mt_emi_reg_read(EMI_MPUI) == 0)) {
 				pr_err("[EMI MPU] A strange violation.\n");
 		} else {
 		aee_kernel_exception("EMI MPU",
@@ -861,12 +891,12 @@ static ssize_t emi_mpu_show(struct device_driver *driver, char *buf)
 	unsigned int d0, d1, d2, d3, d4, d5, d6, d7;
 	static const char *permission[7] = {
 		"No",
-		"Only R/W: SEC",
-		"Only R/W: SEC, non-SEC read",
-		"Only R/W: SEC, non-SEC write",
-		"Only R for SEC/non-SEC",
-		"Both R/W forbidden",
-		"Only SEC W is forbidden"
+		"S_RW",
+		"S_RW_NS_R",
+		"S_RW_NS_W",
+		"S_R_NS_R",
+		"FOR",
+		"S_R_NS_RW"
 	};
 
 	reg_value = mt_emi_reg_read(EMI_MPUA);
@@ -958,6 +988,16 @@ static ssize_t emi_mpu_show(struct device_driver *driver, char *buf)
 	start = ((reg_value >> 16) << 16) + emi_physical_offset;
 	end = ((reg_value & 0xFFFF) << 16) + emi_physical_offset + 0xFFFF;
 	ptr += sprintf(ptr, "R17 --> 0x%x to 0x%x\n", start, end);
+
+	reg_value = mt_emi_reg_read(EMI_MPUC3);
+	start = ((reg_value >> 16) << 16) + emi_physical_offset;
+	end = ((reg_value & 0xFFFF) << 16) + emi_physical_offset + 0xFFFF;
+	ptr += sprintf(ptr, "R18 --> 0x%x to 0x%x\n", start, end);
+
+	reg_value = mt_emi_reg_read(EMI_MPUD3);
+	start = ((reg_value >> 16) << 16) + emi_physical_offset;
+	end = ((reg_value & 0xFFFF) << 16) + emi_physical_offset + 0xFFFF;
+	ptr += sprintf(ptr, "R19 --> 0x%x to 0x%x\n", start, end);
 
 	ptr += sprintf(ptr, "\n");
 
@@ -1215,6 +1255,34 @@ static ssize_t emi_mpu_show(struct device_driver *driver, char *buf)
 	ptr += sprintf(ptr, "R17 --> d0 = %s, d1 = %s, d2 = %s, d3 = %s\n",
 	permission[d0],  permission[d1],  permission[d2], permission[d3]);
 	ptr += sprintf(ptr, "R17 --> d4 = %s, d5 = %s, d6 = %s, d7 = %s\n",
+	permission[d4],  permission[d5],  permission[d6], permission[d7]);
+
+	reg_value = mt_emi_reg_read(EMI_MPUK3);
+	d0 = (reg_value & 0x7);
+	d1 = (reg_value >> 3) & 0x7;
+	d2 = (reg_value >> 6) & 0x7;
+	d3 = (reg_value >> 9) & 0x7;
+	d4 = (reg_value >> 12) & 0x7;
+	d5 = (reg_value >> 15) & 0x7;
+	d6 = (reg_value >> 18) & 0x7;
+	d7 = (reg_value >> 21) & 0x7;
+	ptr += sprintf(ptr, "R18 --> d0 = %s, d1 = %s, d2 = %s, d3 = %s\n",
+	permission[d0],  permission[d1],  permission[d2], permission[d3]);
+	ptr += sprintf(ptr, "R18 --> d4 = %s, d5 = %s, d6 = %s, d7 = %s\n",
+	permission[d4],  permission[d5],  permission[d6], permission[d7]);
+
+	reg_value = mt_emi_reg_read(EMI_MPUL3);
+	d0 = (reg_value & 0x7);
+	d1 = (reg_value >> 3) & 0x7;
+	d2 = (reg_value >> 6) & 0x7;
+	d3 = (reg_value >> 9) & 0x7;
+	d4 = (reg_value >> 12) & 0x7;
+	d5 = (reg_value >> 15) & 0x7;
+	d6 = (reg_value >> 18) & 0x7;
+	d7 = (reg_value >> 21) & 0x7;
+	ptr += sprintf(ptr, "R19 --> d0 = %s, d1 = %s, d2 = %s, d3 = %s\n",
+	permission[d0],  permission[d1],  permission[d2], permission[d3]);
+	ptr += sprintf(ptr, "R19 --> d4 = %s, d5 = %s, d6 = %s, d7 = %s\n",
 	permission[d4],  permission[d5],  permission[d6], permission[d7]);
 
 	return strlen(buf);
@@ -1797,7 +1865,7 @@ out:
 DRIVER_ATTR(emi_wp_vio, 0644, emi_wp_vio_show, emi_wp_vio_store);
 #endif /* #ifdef ENABLE_EMI_WATCH_POINT */
 
-#define AP_REGION_ID   17
+#define AP_REGION_ID   19
 static void protect_ap_region(void)
 {
 
@@ -1969,6 +2037,7 @@ static void __exit emi_mpu_mod_exit(void)
 module_init(emi_mpu_mod_init);
 module_exit(emi_mpu_mod_exit);
 
+#ifdef CONFIG_MTK_LM_MODE
 unsigned int enable_4G(void)
 {
 	return enable_4gb;
@@ -2021,3 +2090,4 @@ static int __init dram_4gb_init(void)
 }
 
 early_initcall(dram_4gb_init);
+#endif

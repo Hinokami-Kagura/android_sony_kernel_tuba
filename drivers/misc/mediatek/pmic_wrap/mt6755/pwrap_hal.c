@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /******************************************************************************
  * pwrap_hal.c - Linux pmic_wrapper Driver,hardware_dependent driver
  *
@@ -76,7 +89,7 @@ static void pwrap_of_iounmap(void);
 
 #ifdef PMIC_WRAP_NO_PMIC
 /*-pwrap debug--------------------------------------------------------------------------*/
-static inline void pwrap_dump_all_register(void)
+void pwrap_dump_all_register(void)
 {
 	return;
 }
@@ -331,7 +344,7 @@ static inline void pwrap_dump_pmic_register(void)
 #endif
 }
 
-static inline void pwrap_dump_all_register(void)
+void pwrap_dump_all_register(void)
 {
 	pwrap_dump_ap_register();
 	pwrap_dump_pmic_register();

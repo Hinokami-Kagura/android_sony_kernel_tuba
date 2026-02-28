@@ -1,4 +1,4 @@
 ifeq ($(CONFIG_MICROTRUST_TEE_SUPPORT), y)
-obj-$(CONFIG_MICROTRUST_TEE_SUPPORT) += V1.0/
+obj-y += V1.0/
 endif
 

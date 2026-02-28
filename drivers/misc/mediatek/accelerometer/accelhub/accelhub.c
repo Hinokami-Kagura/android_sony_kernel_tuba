@@ -205,7 +205,7 @@ static int accelhub_ReadSensorData(char *buf, int bufsize)
 	struct data_unit_t data;
 	int acc[ACCELHUB_AXES_NUM];
 	int err = 0;
-
+	int status = 0;
 	if (!atomic_read(&obj->scp_init_done)) {
 		GSE_ERR("sensor hub has not been ready!!\n");
 		return -1;
@@ -225,10 +225,11 @@ static int accelhub_ReadSensorData(char *buf, int bufsize)
 	acc[ACCELHUB_AXIS_X] = data.accelerometer_t.x;
 	acc[ACCELHUB_AXIS_Y] = data.accelerometer_t.y;
 	acc[ACCELHUB_AXIS_Z] = data.accelerometer_t.z;
-	/*GSE_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d!\n", time_stamp, time_stamp_gpt,
-		acc[ACCELHUB_AXIS_X], acc[ACCELHUB_AXIS_Y], acc[ACCELHUB_AXIS_Z]);*/
+	status				 = data.accelerometer_t.status;
+	/*GSE_ERR("accelhub_ReadSensorData: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d, status:%d!\n", time_stamp, time_stamp_gpt,
+		acc[ACCELHUB_AXIS_X], acc[ACCELHUB_AXIS_Y], acc[ACCELHUB_AXIS_Z], status);*/
 
-	sprintf(buf, "%04x %04x %04x", acc[ACCELHUB_AXIS_X], acc[ACCELHUB_AXIS_Y], acc[ACCELHUB_AXIS_Z]);
+	sprintf(buf, "%04x %04x %04x %04x", acc[ACCELHUB_AXIS_X], acc[ACCELHUB_AXIS_Y], acc[ACCELHUB_AXIS_Z], status);
 	if (atomic_read(&obj->trace) & ACCELHUB_TRC_IOCTL)
 		GSE_LOG("gsensor data: %s!\n", buf);
 
@@ -461,10 +462,12 @@ static long accelhub_unlocked_ioctl(struct file *file, unsigned int cmd, unsigne
 	struct accelhub_ipi_data *obj = obj_ipi_data;
 	char strbuf[ACCELHUB_BUFSIZE];
 	void __user *data;
+	int use_in_factory_mode = USE_IN_FACTORY_MODE;
 	struct SENSOR_DATA sensor_data;
 	long err = 0;
 	int cali[3];
-
+	static int first_time_enable = 0;
+	
 	if (_IOC_DIR(cmd) & _IOC_READ)
 		err = !access_ok(VERIFY_WRITE, (void __user *)arg, _IOC_SIZE(cmd));
 	else if (_IOC_DIR(cmd) & _IOC_WRITE)
@@ -502,11 +505,25 @@ static long accelhub_unlocked_ioctl(struct file *file, unsigned int cmd, unsigne
 			err = -EINVAL;
 			break;
 		}
-
-		err = accelhub_SetPowerMode(true);
-		if (err < 0) {
-			GSE_ERR("accelhub_SetPowerMode fail\n");
-			break;
+		if (first_time_enable == 0) {
+			err = sensor_set_cmd_to_hub(ID_ACCELEROMETER, CUST_ACTION_SET_FACTORY, &use_in_factory_mode);
+			if (err < 0) {
+				GSE_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n", ID_ACCELEROMETER,
+					CUST_ACTION_SET_TRACE);
+				return 0;
+			}		
+			err = accelhub_SetPowerMode(true);
+			if (err < 0) {
+				GSE_ERR("accelhub_SetPowerMode fail\n");
+				break;
+			}
+			err = sensor_set_delay_to_hub(ID_ACCELEROMETER, 20);
+			if (err < 0) {
+				GSE_ERR("sensor_set_delay_to_hub fail, (ID: %d),(action: %d)\n", ID_ACCELEROMETER,
+					CUST_ACTION_SET_TRACE);
+				return 0;
+			}
+			first_time_enable = 1;
 		}
 		err = accelhub_ReadSensorData(strbuf, ACCELHUB_BUFSIZE);
 		if (err < 0) {
@@ -626,6 +643,7 @@ static long compat_accelhub_unlocked_ioctl(struct file *filp, unsigned int cmd, 
 	case GSENSOR_IOCTL_CLR_CALI:
 	case GSENSOR_IOCTL_GET_CALI:
 		ret = filp->f_op->unlocked_ioctl(filp, cmd, (unsigned long)compat_ptr(arg));
+		break;
 	default:{
 			GSE_ERR("compat_ion_ioctl : No such command!! 0x%x\n", cmd);
 			return -ENOIOCTLCMD;
@@ -710,8 +728,7 @@ static int gsensor_get_data(int *x, int *y, int *z, int *status)
 		GSE_ERR("accelhub_ReadSensorData fail!!\n");
 		return -1;
 	}
-	if (3 == sscanf(buff, "%x %x %x", x, y, z))
-		*status = SENSOR_STATUS_ACCURACY_MEDIUM;
+	sscanf(buff, "%x %x %x %x", x, y, z, status);
 
 	if (atomic_read(&obj->trace) & ACCELHUB_TRC_RAWDATA)
 		GSE_ERR("x = %d, y = %d, z = %d\n", *x, *y, *z);
@@ -785,8 +802,8 @@ static int accelhub_probe(struct platform_device *pdev)
 	ctl.open_report_data = gsensor_open_report_data;
 	ctl.enable_nodata = gsensor_enable_nodata;
 	ctl.set_delay = gsensor_set_delay;
-	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_report_input_direct = true;
+	ctl.is_support_batch = false;
 
 	err = acc_register_control_path(&ctl);
 	if (err) {
@@ -802,7 +819,7 @@ static int accelhub_probe(struct platform_device *pdev)
 		goto exit_create_attr_failed;
 	}
 
-	err = batch_register_support_info(ID_ACCELEROMETER, ctl.is_support_batch, data.vender_div, 0);
+	err = batch_register_support_info(ID_ACCELEROMETER, ctl.is_support_batch, data.vender_div, 1);
 	if (err) {
 		GSE_ERR("register gsensor batch support err = %d\n", err);
 		goto exit_create_attr_failed;
@@ -840,43 +857,12 @@ static int accelhub_remove(struct platform_device *pdev)
 
 static int accelhub_suspend(struct platform_device *pdev, pm_message_t msg)
 {
-	struct accelhub_ipi_data *obj = platform_get_drvdata(pdev);
-	int err = 0;
-
-	GSE_FUN();
-
-	if (msg.event == PM_EVENT_SUSPEND) {
-		if (obj == NULL) {
-			GSE_ERR("null pointer!!\n");
-			return -EINVAL;
-		}
-		atomic_set(&obj->suspend, 1);
-		err = accelhub_SetPowerMode(false);
-		if (err < 0)
-			return err;
-		GSE_LOG("accelhub_suspend ok\n");
-	}
-	return err;
+	return 0;
 }
 
 static int accelhub_resume(struct platform_device *pdev)
 {
-	struct accelhub_ipi_data *obj = platform_get_drvdata(pdev);
-	int err = 0;
-
-	GSE_FUN();
-
-	if (obj == NULL) {
-		GSE_ERR("null pointer!!\n");
-		return -EINVAL;
-	}
-
-	atomic_set(&obj->suspend, 0);
-	err = accelhub_SetPowerMode(true);
-	if (err < 0)
-		return err;
-	GSE_LOG("accelhub_resume ok\n");
-
+	
 	return 0;
 }
 

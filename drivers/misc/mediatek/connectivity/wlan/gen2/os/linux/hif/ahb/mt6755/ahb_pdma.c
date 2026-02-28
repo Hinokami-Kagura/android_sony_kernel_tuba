@@ -1,21 +1,14 @@
-/******************************************************************************
-*[File]             ahb_pdma.c
-*[Version]          v1.0
-*[Revision Date]    2013-03-13
-*[Author]
-*[Description]
-*    The program provides AHB PDMA driver
-*[Copyright]
-*    Copyright (C) 2013 MediaTek Incorporation. All Rights Reserved.
-******************************************************************************/
-
 /*
-** Log: ahb_pdma.c
- *
- * 03 13 2013 vend_samp.lin
- * Add AHB PDMA support
- * 1) Initial version
-**
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
 */
 
 /*******************************************************************************
@@ -481,7 +474,7 @@ static VOID HifPdmaRegDump(IN void *HifInfoSrc)
 			if ((chnlStatus >> i & 0x1) == 0)
 				continue;
 			pucChnlStatus = (PUINT_8) ioremap(AP_DMA_HIF_BASE + i * 0x80, 0x70);
-			if (pucChnlStatus) {
+			if (!pucChnlStatus) {
 				DBGLOG(INIT, INFO, "AP_DMA_BASE+%x, ioremap fail\n", i * 0x80);
 				continue;
 			}

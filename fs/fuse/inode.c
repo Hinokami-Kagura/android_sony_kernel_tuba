@@ -7,7 +7,7 @@
 */
 
 #include "fuse_i.h"
-#include "fuse.h"
+#include "mt_fuse.h"
 #include <linux/pagemap.h>
 #include <linux/slab.h>
 #include <linux/file.h>
@@ -461,6 +461,7 @@ enum {
 	OPT_GROUP_ID,
 	OPT_DEFAULT_PERMISSIONS,
 	OPT_ALLOW_OTHER,
+	OPT_ALLOW_UTIME_GRP,
 	OPT_MAX_READ,
 	OPT_BLKSIZE,
 	OPT_ERR
@@ -473,6 +474,7 @@ static const match_table_t tokens = {
 	{OPT_GROUP_ID,			"group_id=%u"},
 	{OPT_DEFAULT_PERMISSIONS,	"default_permissions"},
 	{OPT_ALLOW_OTHER,		"allow_other"},
+	{OPT_ALLOW_UTIME_GRP,		"allow_utime_grp"},
 	{OPT_MAX_READ,			"max_read=%u"},
 	{OPT_BLKSIZE,			"blksize=%u"},
 	{OPT_ERR,			NULL}
@@ -548,6 +550,11 @@ static int parse_fuse_opt(char *opt, struct fuse_mount_data *d, int is_bdev)
 			d->flags |= FUSE_ALLOW_OTHER;
 			break;
 
+		//[CEI][SM10N][SD] DMS10895023 geotag issue ,fixed by DMS01421006
+		case OPT_ALLOW_UTIME_GRP:
+			d->flags |= FUSE_ALLOW_UTIME_GRP;
+			break;
+
 		case OPT_MAX_READ:
 			if (match_int(&args[0], &value))
 				return 0;
@@ -583,6 +590,9 @@ static int fuse_show_options(struct seq_file *m, struct dentry *root)
 		seq_puts(m, ",default_permissions");
 	if (fc->flags & FUSE_ALLOW_OTHER)
 		seq_puts(m, ",allow_other");
+	//[CEI][SM10N][SD] DMS10895023 geotag issue ,fixed by DMS01421006
+	if (fc->flags & FUSE_ALLOW_UTIME_GRP)
+		seq_puts(m, ",allow_utime_grp");
 	if (fc->max_read != ~0)
 		seq_printf(m, ",max_read=%u", fc->max_read);
 	if (sb->s_bdev && sb->s_blocksize != FUSE_DEFAULT_BLKSIZE)
@@ -867,6 +877,7 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 		fc->conn_error = 1;
 	else {
 		unsigned long ra_pages;
+		//[CEI comment] fuse: Add support for passthrough read/write
 		struct super_block *sb = fc->sb;
 
 		process_init_limits(fc, arg);
@@ -906,6 +917,7 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 				fc->async_dio = 1;
 			if (arg->flags & FUSE_WRITEBACK_CACHE)
 				fc->writeback_cache = 1;
+			//[CEI comment] fuse: Add support for passthrough read/write
 			if (arg->flags & FUSE_PASSTHROUGH) {
 				fc->passthrough = 1;
 				/* Prevent further stacking */

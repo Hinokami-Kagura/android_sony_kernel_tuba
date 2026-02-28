@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
 #include "inc/gyroscope.h"
 
 struct gyro_context *gyro_context_obj = NULL;
@@ -67,14 +80,15 @@ static void gyro_work_func(struct work_struct *work)
 	cxt  = gyro_context_obj;
 	delay_ms = atomic_read(&cxt->delay);
 
-	if (NULL == cxt->gyro_data.get_data)
+	if (NULL == cxt->gyro_data.get_data) {
 		GYRO_ERR("gyro driver not register data path\n");
-
+		return;
+	}
 
 	cur_ns = getCurNS();
 
     /* add wake lock to make sure data can be read before system suspend */
-	cxt->gyro_data.get_data(&x, &y, &z, &status);
+	err = cxt->gyro_data.get_data(&x, &y, &z, &status);
 
 	if (err) {
 		GYRO_ERR("get gyro data fails!!\n");
@@ -447,8 +461,13 @@ static ssize_t gyro_show_devnum(struct device *dev,
 	unsigned int devnum;
 	const char *devname = NULL;
 	int ret = 0;
+	struct input_handle *handle;
 
-	devname = dev_name(&gyro_context_obj->idev->dev);
+	list_for_each_entry(handle, &gyro_context_obj->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
 	ret = sscanf(devname+5, "%d", &devnum);
 	return snprintf(buf, PAGE_SIZE, "%d\n", devnum);
 }
@@ -554,13 +573,13 @@ static int gyro_misc_init(struct gyro_context *cxt)
 	return err;
 }
 
-static void gyro_input_destroy(struct gyro_context *cxt)
+/* static void gyro_input_destroy(struct gyro_context *cxt)
 {
 	struct input_dev *dev = cxt->idev;
 
 	input_unregister_device(dev);
 	input_free_device(dev);
-}
+} */
 
 static int gyro_input_init(struct gyro_context *cxt)
 {
@@ -646,7 +665,7 @@ int gyro_register_control_path(struct gyro_control_path *ctl)
 	cxt->gyro_ctl.is_support_batch = ctl->is_support_batch;
 	cxt->gyro_ctl.gyro_calibration = ctl->gyro_calibration;
 	cxt->gyro_ctl.is_use_common_factory = ctl->is_use_common_factory;
-
+	cxt->gyro_ctl.is_report_input_direct = ctl->is_report_input_direct;
 	if (NULL == cxt->gyro_ctl.set_delay || NULL == cxt->gyro_ctl.open_report_data
 		|| NULL == cxt->gyro_ctl.enable_nodata) {
 		GYRO_LOG("gyro register control path fail\n");
@@ -746,10 +765,11 @@ static int gyro_probe(void)
 	GYRO_LOG("----gyro_probe OK !!\n");
 	return 0;
 
-	if (err) {
+	/* Structurally dead code (UNREACHABLE) */
+	/* if (err) {
 		GYRO_ERR("sysfs node creation error\n");
 		gyro_input_destroy(gyro_context_obj);
-	}
+	} */
 
 real_driver_init_fail:
 exit_alloc_input_dev_failed:

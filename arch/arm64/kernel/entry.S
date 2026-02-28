@@ -395,7 +395,7 @@ ENDPROC(el1_error_invalid)
 el1_sync:
 	kernel_entry 1
 	mov	x0, sp
-	and	x20, x0, #0xffffffffffffc000
+	and	x20, x0, #~(THREAD_SIZE - 1)	// top of stack
 	ldr	w4, [x20, #TI_CPU_EXCP]
 	add	w4, w4, #0x1
 	str	w4, [x20, #TI_CPU_EXCP]
@@ -405,6 +405,12 @@ el1_sync:
 el1_sync_nest:
 	cmp	w4, #0x2
 	b.lt	el1_sync_nest_skip
+	b.gt	el1_sync_nest_stop
+	mrs	x1, esr_el1			// read the syndrome register
+	lsr	x24, x1, #ESR_EL1_EC_SHIFT	// exception class
+	cmp	x24, #ESR_EL1_EC_DABT_EL1	// data abort in EL1
+	b.eq	el1_sync_nest_skip
+el1_sync_nest_stop:
 	bl	aee_stop_nested_panic
 el1_sync_nest_skip:
 	mrs	x1, esr_el1			// read the syndrome register
@@ -435,7 +441,7 @@ el1_da:
 	mov	x2, sp				// struct pt_regs
 	bl	do_mem_abort
 	mov	x5, sp
-	and	x20, x5, #0xffffffffffffc000
+	and	x20, x5, #~(THREAD_SIZE - 1)	// top of stack
 	ldr	w4, [x20, #TI_CPU_EXCP]
 	sub	w4, w4, #0x1
 	str	w4, [x20, #TI_CPU_EXCP]
@@ -457,7 +463,8 @@ el1_undef:
 	 */
 	enable_dbg
 	mov	x0, sp
-	b	do_undefinstr
+	bl	do_undefinstr
+	kernel_exit 1
 el1_dbg:
 	/*
 	 * Debug exception handling
@@ -469,7 +476,7 @@ el1_dbg:
 	mov	x2, sp				// struct pt_regs
 	bl	do_debug_exception
 	mov	x5, sp
-	and	x20, x5, #0xffffffffffffc000
+	and	x20, x5, #~(THREAD_SIZE - 1)	// top of stack
 	ldr	w4, [x20, #TI_CPU_EXCP]
 	sub	w4, w4, #0x1
 	str	w4, [x20, #TI_CPU_EXCP]

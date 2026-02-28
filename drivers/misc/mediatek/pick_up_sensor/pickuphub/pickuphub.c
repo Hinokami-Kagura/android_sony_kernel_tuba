@@ -21,22 +21,19 @@
 #include <linux/input.h>
 #include <linux/workqueue.h>
 #include <linux/kobject.h>
-#include <linux/earlysuspend.h>
+
 #include <linux/platform_device.h>
 #include <asm/atomic.h>
 
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
+#include <hwmsen_dev.h>
+#include <sensors_io.h>
 #include "pickuphub.h"
 #include <pick_up.h>
-#include <linux/hwmsen_helper.h>
+#include <hwmsen_helper.h>
 
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
 
-#include <linux/batch.h>
+#include <batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
@@ -154,7 +151,12 @@ static int pickup_gesture_get_data(int *probability, int *status)
 
 static int pickup_gesture_open_report_data(int open)
 {
-	return sensor_enable_to_hub(ID_PICK_UP_GESTURE, open);
+	int ret = 0;
+
+	if (open == 1)
+		ret = sensor_set_delay_to_hub(ID_PICK_UP_GESTURE, 120);
+	ret = sensor_enable_to_hub(ID_PICK_UP_GESTURE, open);
+	return ret;
 }
 
 static int SCP_sensorHub_notify_handler(void *data, unsigned int len)

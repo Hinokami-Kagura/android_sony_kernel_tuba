@@ -458,13 +458,16 @@ static int __init __reserved_mem_reserve_reg(unsigned long node,
 		    early_init_dt_reserve_memory_arch(base, size, nomap) == 0) {
 			pr_debug("Reserved memory: reserved region for node '%s': base %pa, size %ld MiB\n",
 				uname, &base, (unsigned long)size / SZ_1M);
-			if (nomap)
+			if (nomap) {
+				mtk_memcfg_write_memory_layout_info(MTK_MEMCFG_MEMBLOCK_PHY,
+						uname, base, size);
 				MTK_MEMCFG_LOG_AND_PRINTK(
 					"[PHY layout]%s   :   0x%08llx - 0x%08llx (0x%llx)\n",
 					uname,
 					(unsigned long long)base,
 					(unsigned long long)base + size - 1,
 					(unsigned long long)size);
+			}
 		} else
 			pr_info("Reserved memory: failed to reserve memory for node '%s': base %pa, size %ld MiB\n",
 				uname, &base, (unsigned long)size / SZ_1M);
@@ -967,6 +970,11 @@ void __init __weak early_init_dt_add_memory_arch(u64 base, u64 size)
 {
 	const u64 phys_offset = __pa(PAGE_OFFSET);
 
+#ifdef CONFIG_CCI_KLOG
+        int ret = 0;
+#endif
+
+
 	if (!PAGE_ALIGNED(base)) {
 		size -= PAGE_SIZE - (base & ~PAGE_MASK);
 		base = PAGE_ALIGN(base);
@@ -998,8 +1006,6 @@ void __init __weak early_init_dt_add_memory_arch(u64 base, u64 size)
 	}
 
 #ifdef CONFIG_CCI_KLOG
-	int ret = 0;
-
 	printk("%s():start=0x%llX, size=0x%llX\n", __func__, base, size);
 	if(base < (u64)CCI_KLOG_START_ADDR_PHYSICAL && base + size > (u64)CCI_KLOG_START_ADDR_PHYSICAL + (u64)CCI_KLOG_SIZE)
 	{

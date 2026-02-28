@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <mali_kbase.h>
 #include <mali_kbase_mem.h>
 
@@ -7,6 +20,7 @@
 #include "mt_gpufreq.h"
 #include <mali_kbase_pm_internal.h>
 
+#include <ged_log.h>
 
 #include <linux/workqueue.h>
 #include <mt-plat/aee.h>
@@ -28,6 +42,8 @@ int g_mtk_gpu_total_memory_usage_in_pages_debugfs;
 atomic_t g_mtk_gpu_total_memory_usage_in_pages;
 atomic_t g_mtk_gpu_peak_memory_usage_in_pages;
 static mtk_gpu_meminfo_type g_mtk_gpu_meminfo[MTK_MEMINFO_SIZE];
+
+int g_mtk_gpu_efuse_set_already = 0;
 
 extern u32 kbasep_get_gl_utilization(void);
 extern u32 kbasep_get_cl_js0_utilization(void);
@@ -207,7 +223,7 @@ static int proc_gpu_utilization_show(struct seq_file *m, void *v)
     unsigned int iCurrentFreq;
 
     iCurrentFreq = mt_gpufreq_get_cur_freq_index();
-    
+
     gl  = kbasep_get_gl_utilization();
     cl0 = kbasep_get_cl_js0_utilization();
     cl1 = kbasep_get_cl_js1_utilization();
@@ -304,24 +320,66 @@ static const struct file_operations kbasep_gpu_dvfs_enable_debugfs_fops = {
 	.release = single_release,
 };
 
+static struct proc_dir_entry *mali_pentry;
 
 static struct workqueue_struct     *g_aee_workqueue = NULL;
 static struct work_struct          g_aee_work;
-
-static struct proc_dir_entry *mali_pentry;
-
+static int g_aee_called = 0;
 static void aee_Handle(struct work_struct *_psWork)
 {
     /* avoid the build warnning */
     _psWork = _psWork;
-    aee_kernel_exception("gpulog", "aee dump gpulog");
-}
-void mtk_trigger_aee(void)
-{
-    if (g_aee_workqueue)
+
+#ifdef MTK_MT6797_DEBUG
     {
-        queue_work(g_aee_workqueue, &g_aee_work);
+        void mtk_debug_dump_registers(void);
+        mtk_debug_dump_registers();
     }
+
+#if 0
+    aee_kernel_exception("gpulog", "aee dump gpulog");
+    g_aee_called = 0;
+#endif
+#endif
+}
+void mtk_trigger_aee_report(const char *msg)
+{
+    MTK_err("trigger aee: %s (aee warnning)", msg);
+    if (g_aee_called == 0)
+    {
+        if (g_aee_workqueue)
+        {
+			g_aee_called = 1;
+            queue_work(g_aee_workqueue, &g_aee_work);
+        }
+    }
+}
+
+static struct work_struct          g_pa_work;
+static u64 g_pa;
+static void pa_Handle(struct work_struct *_psWork)
+{
+    /* avoid the build warnning */
+    _psWork = _psWork;
+
+#if 0
+    {
+        bool kbase_debug_gpu_mem_mapping_check_pa(u64 pa);
+        kbase_debug_gpu_mem_mapping_check_pa(g_pa);
+    }
+#endif
+}
+void mtk_trigger_emi_report(u64 pa)
+{
+    g_pa = pa;
+    MTK_err("emi mpu violation: pa: 0x%llx, dump registers and trigger check_pa", pa);
+#ifdef MTK_MT6797_DEBUG
+    {
+        void mtk_debug_dump_registers(void);
+        mtk_debug_dump_registers();
+    }
+#endif
+    queue_work(g_aee_workqueue, &g_pa_work);
 }
 
 void proc_mali_register(void)
@@ -333,6 +391,7 @@ void proc_mali_register(void)
 
     g_aee_workqueue = alloc_ordered_workqueue("mali_aeewp", WQ_FREEZABLE | WQ_MEM_RECLAIM);
     INIT_WORK(&g_aee_work, aee_Handle);
+    INIT_WORK(&g_pa_work, pa_Handle);
 
     proc_create("help", 0, mali_pentry, &kbasep_gpu_help_debugfs_fops);
     proc_create("memory_usage", 0, mali_pentry, &kbasep_gpu_memory_usage_debugfs_open);

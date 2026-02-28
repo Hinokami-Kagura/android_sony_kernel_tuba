@@ -15,6 +15,7 @@
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/random.h>
 #ifdef CONFIG_PM_WAKEUP_TIMES
 #include <linux/poll.h>
 #endif
@@ -31,6 +32,16 @@
 #endif
 #undef hib_warn
 #define hib_warn(fmt, ...) pr_warn("[%s][%s]" fmt, _TAG_HIB_M, __func__, ##__VA_ARGS__)
+
+/*
+ * suspend back-off default values
+ */
+#define SBO_SLEEP_MSEC 1100
+#define SBO_TIME 10
+#define SBO_CNT 10
+
+static unsigned suspend_short_count;
+static struct wakeup_source *ws;
 
 DEFINE_MUTEX(pm_mutex);
 EXPORT_SYMBOL_GPL(pm_mutex);
@@ -419,10 +430,28 @@ static suspend_state_t decode_state(const char *buf, size_t n)
 	return PM_SUSPEND_ON;
 }
 
+static void
+suspend_backoff_range(u32 start, u32 end)
+{
+	u32 range, timeout;
+
+	if (end <= start)
+		return;
+
+	range = end - start;
+	timeout = get_random_int() % range + start;
+
+	pr_info("suspend: too many immediate wakeups, back off (%u msec)\n", timeout);
+	__pm_wakeup_event(ws, timeout);
+}
+
 static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 			   const char *buf, size_t n)
 {
 	suspend_state_t state;
+	struct timespec ts_entry, ts_exit;
+	u64 elapsed_msecs64;
+	u32 elapsed_msecs32;
 	int error;
 
 #ifdef CONFIG_MTK_HIBERNATION
@@ -454,7 +483,30 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 	pr_warn("[%s]: state = (%d)\n", __func__, state);
 
 	if (state < PM_SUSPEND_MAX) {
+		/*
+		 * We want to prevent system from frequent periodic wake-ups
+		 * when sleeping time is less or equal certain interval.
+		 * It's done in order to save power in certain cases, one of
+		 * the examples is GPS tracking, but not only.
+		 */
+		getnstimeofday(&ts_entry);
 		error = pm_suspend(state);
+		getnstimeofday(&ts_exit);
+
+		elapsed_msecs64 = timespec_to_ns(&ts_exit) -
+			timespec_to_ns(&ts_entry);
+		do_div(elapsed_msecs64, NSEC_PER_MSEC);
+		elapsed_msecs32 = elapsed_msecs64;
+
+		if (elapsed_msecs32 <= SBO_SLEEP_MSEC) {
+			if (suspend_short_count == SBO_CNT)
+				suspend_backoff_range((SBO_TIME * MSEC_PER_SEC) / 2,
+					SBO_TIME * MSEC_PER_SEC);
+			else
+				suspend_short_count++;
+		} else {
+			suspend_short_count = 0;
+		}
 		pr_warn("[%s]: pm_suspend() return (%d)\n", __func__, error);
 	} else if (state == PM_SUSPEND_MAX) {
 #ifdef CONFIG_MTK_HIBERNATION
@@ -752,6 +804,8 @@ static int __init pm_init(void)
 	if (error)
 		return error;
 	pm_print_times_init();
+
+	ws = wakeup_source_register("suspend_backoff");
 	return pm_autosleep_init();
 }
 

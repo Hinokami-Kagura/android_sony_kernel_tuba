@@ -340,24 +340,13 @@ static void hwmsen_work_func(struct work_struct *work)
 				}
 			} else {
 				/* data changed, update the data */
-#if 0
 				if ((sensor_data.values[0] != obj_data.sensors_data[idx].values[0])
 				    || (sensor_data.values[1] !=
 					obj_data.sensors_data[idx].values[1])
 				    || (sensor_data.values[2] !=
 					obj_data.sensors_data[idx].values[2])
 				    || (idx == ID_MAGNETIC) || (idx == ID_ACCELEROMETER)
-				    || (idx == ID_GYROSCOPE) || (idx == ID_ORIENTATION)
-				    || (idx == ID_MAGNETIC_UNCALIBRATED)) //henry: add uncali
-#endif
-				if ((sensor_data.values[0] != obj_data.sensors_data[idx].values[0])
-				    || (sensor_data.values[1] !=
-					obj_data.sensors_data[idx].values[1])
-				    || (sensor_data.values[2] !=
-					obj_data.sensors_data[idx].values[2])
-				    || (idx == ID_MAGNETIC) || (idx == ID_ACCELEROMETER)
-				    || (idx == ID_GYROSCOPE) || (idx == ID_ORIENTATION))
-				{
+				    || (idx == ID_GYROSCOPE) || (idx == ID_ORIENTATION)) {
 					if ((0 == sensor_data.values[0]
 					     && 0 == sensor_data.values[1]
 					     && 0 == sensor_data.values[2])
@@ -375,13 +364,6 @@ static void hwmsen_work_func(struct work_struct *work)
 					    sensor_data.value_divide;
 					obj_data.sensors_data[idx].status = sensor_data.status;
 					obj_data.sensors_data[idx].time = nt;
-#if 0 //henry: add uncali
-					/***********add for magnetometer uncalibration sensor*****************/
-					obj_data.sensors_data[idx].values[3] = sensor_data.values[3];
-					obj_data.sensors_data[idx].values[4] = sensor_data.values[4];
-					obj_data.sensors_data[idx].values[5] = sensor_data.values[5];
-					/***********add for magnetometer uncalibration sensor end*****************/
-#endif
 					event_type |= (1LL << idx);
 					mutex_unlock(&obj_data.lock);
 					/*HWM_LOG("get %d sensor, values: %d, %d, %d!\n", idx,*/
@@ -616,12 +598,8 @@ static int hwmsen_enable(struct hwmdev_object *obj, int sensor, int enable)
 		return -EINVAL;
 	}
 
-	if (sensor > MAX_ANDROID_SENSOR_NUM || sensor < 0) {
-		HWM_ERR("handle %d!\n", sensor);
-		return -EINVAL;
-	}
 
-	if (sensor > MAX_ANDROID_SENSOR_NUM) {
+	if (sensor > MAX_ANDROID_SENSOR_NUM || sensor < 0) {
 		HWM_ERR("handle %d!\n", sensor);
 		return -EINVAL;
 	}
@@ -634,10 +612,12 @@ static int hwmsen_enable(struct hwmdev_object *obj, int sensor, int enable)
 		return -ENODEV;
 	}
 
-
+	if (sensor > MAX_ANDROID_SENSOR_NUM) {
+		HWM_ERR("sensor %d!\n", sensor);
+		return -ENODEV;
+	}
 	mutex_lock(&obj->dc->lock);
 	cxt = obj->dc->cxt[sensor];
-
 
 	if (enable == 1) {
 		/*{@for mt6582 blocking issue work around*/
@@ -750,11 +730,6 @@ static int hwmsen_enable_nodata(struct hwmdev_object *obj, int sensor, int enabl
 		return -EINVAL;
 	}
 
-	if (sensor > MAX_ANDROID_SENSOR_NUM) {
-		HWM_ERR("handle %d!\n", sensor);
-		return -EINVAL;
-	}
-    
 	if (NULL == obj) {
 		HWM_ERR("hwmdev obj pointer is NULL!\n");
 		return -EINVAL;
@@ -763,7 +738,10 @@ static int hwmsen_enable_nodata(struct hwmdev_object *obj, int sensor, int enabl
 		return -ENODEV;
 	}
 
-
+	if (sensor > MAX_ANDROID_SENSOR_NUM) {
+		HWM_ERR("sensor %d!\n", sensor);
+		return -EINVAL;
+	}
 	mutex_lock(&obj->dc->lock);
 	cxt = obj->dc->cxt[sensor];
 
@@ -815,6 +793,10 @@ static int hwmsen_set_delay(int delay, int handle)
 		return -EINVAL;
 	}
 
+	if (handle > MAX_ANDROID_SENSOR_NUM || handle < 0) {
+		HWM_ERR("handle %d!\n", handle);
+		return -EINVAL;
+	}
 	cxt = hwm_obj->dc->cxt[handle];
 	if (NULL == cxt || (cxt->obj.sensor_operate == NULL)) {
 		HWM_ERR("have no this sensor %d or operator point is null!\r\n", handle);
@@ -1012,8 +994,13 @@ static ssize_t hwmsen_show_sensordevnum(struct device *dev,
 					struct device_attribute *attr, char *buf)
 {
 	const char *devname = NULL;
+	struct input_handle *handle;
 
-	devname = dev_name(&hwm_obj->idev->dev);
+	list_for_each_entry(handle, &hwm_obj->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
 
 	return snprintf(buf, PAGE_SIZE, "%s\n", devname + 5);
 }
@@ -1187,7 +1174,7 @@ static long hwmsen_unlocked_ioctl(struct file *fp, unsigned int cmd, unsigned lo
 	void __user *argp = (void __user *)arg;
 	uint32_t flag;
 	struct sensor_delay delayPara;
-	struct hwm_trans_data hwm_sensors_data;
+	struct hwm_trans_data *hwm_sensors_data;
 	int i = 0;
 	int idx = 0;
 	atomic_t delaytemp;
@@ -1234,8 +1221,13 @@ static long hwmsen_unlocked_ioctl(struct file *fp, unsigned int cmd, unsigned lo
 		break;
 
 	case HWM_IO_GET_SENSORS_DATA:
-		if (copy_from_user(&hwm_sensors_data, argp, sizeof(hwm_sensors_data))) {
+		hwm_sensors_data = kmalloc(sizeof(*hwm_sensors_data), GFP_KERNEL);
+		if (!hwm_sensors_data)
+			return -ENOMEM;
+
+		if (copy_from_user(hwm_sensors_data, argp, sizeof(*hwm_sensors_data))) {
 			HWM_ERR("copy_from_user fail!!\n");
+			kfree(hwm_sensors_data);
 			return -EFAULT;
 		}
 
@@ -1244,20 +1236,22 @@ static long hwmsen_unlocked_ioctl(struct file *fp, unsigned int cmd, unsigned lo
 			sizeof(struct hwm_sensor_data) * MAX_ANDROID_SENSOR_NUM);*/
 		for (i = 0, idx = 0;
 		     i < MAX_ANDROID_SENSOR_NUM && idx < MAX_SENSOR_DATA_UPDATE_ONCE; i++) {
-			if (hwm_sensors_data.data_type & (1LL << i)) {
-				memcpy(&hwm_sensors_data.data[idx], &(obj_data.sensors_data[i]),
+			if (hwm_sensors_data->data_type & (1LL << i)) {
+				memcpy(&(hwm_sensors_data->data[idx]), &(obj_data.sensors_data[i]),
 				       sizeof(struct hwm_sensor_data));
-				hwm_sensors_data.data[idx].update = 1;
+				hwm_sensors_data->data[idx].update = 1;
 				idx++;
 			}
 		}
 		if (idx < MAX_SENSOR_DATA_UPDATE_ONCE)
-			hwm_sensors_data.data[idx].update = 0;
+			hwm_sensors_data->data[idx].update = 0;
 		mutex_unlock(&obj_data.lock);
-		if (copy_to_user(argp, &hwm_sensors_data, sizeof(hwm_sensors_data))) {
+		if (copy_to_user(argp, hwm_sensors_data, sizeof(*hwm_sensors_data))) {
 			HWM_ERR("copy_to_user fail!!\n");
+			kfree(hwm_sensors_data);
 			return -EFAULT;
 		}
+		kfree(hwm_sensors_data);
 		break;
 
 	case HWM_IO_ENABLE_SENSOR_NODATA:
@@ -1283,7 +1277,47 @@ static long hwmsen_unlocked_ioctl(struct file *fp, unsigned int cmd, unsigned lo
 
 	return 0;
 }
+/*----------------------------------------------------------------------------*/
+#ifdef CONFIG_COMPAT
+static long hwmsen_compat_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
+{
+	long err = 0;
 
+	void __user *arg32 = compat_ptr(arg);
+
+	if (!fp->f_op || !fp->f_op->unlocked_ioctl)
+		return -ENOTTY;
+
+	switch (cmd) {
+	case COMPAT_HWM_IO_SET_DELAY:
+		err = fp->f_op->unlocked_ioctl(fp, HWM_IO_SET_DELAY, (unsigned long)arg32);
+		break;
+	case COMPAT_HWM_IO_SET_WAKE:
+		err = fp->f_op->unlocked_ioctl(fp, HWM_IO_SET_WAKE, (unsigned long)arg32);
+		break;
+	case COMPAT_HWM_IO_ENABLE_SENSOR:
+		err = fp->f_op->unlocked_ioctl(fp, HWM_IO_ENABLE_SENSOR, (unsigned long)arg32);
+		break;
+	case COMPAT_HWM_IO_DISABLE_SENSOR:
+		err = fp->f_op->unlocked_ioctl(fp, HWM_IO_DISABLE_SENSOR, (unsigned long)arg32);
+		break;
+	case COMPAT_HWM_IO_GET_SENSORS_DATA:
+		err = fp->f_op->unlocked_ioctl(fp, HWM_IO_GET_SENSORS_DATA, (unsigned long)arg32);
+		break;
+	case COMPAT_HWM_IO_ENABLE_SENSOR_NODATA:
+		err = fp->f_op->unlocked_ioctl(fp, HWM_IO_ENABLE_SENSOR_NODATA, (unsigned long)arg32);
+		break;
+	case COMPAT_HWM_IO_DISABLE_SENSOR_NODATA:
+		err = fp->f_op->unlocked_ioctl(fp, HWM_IO_DISABLE_SENSOR_NODATA, (unsigned long)arg32);
+		break;
+	default:
+		HWM_ERR("Unknown cmd %x!!\n", cmd);
+		return -ENOIOCTLCMD;
+	}
+
+	return err;
+}
+#endif
 /*----------------------------------------------------------------------------*/
 static const struct file_operations hwmsen_fops = {
 /*      .owner  = THIS_MODULE,*/
@@ -1291,6 +1325,9 @@ static const struct file_operations hwmsen_fops = {
 	.release = hwmsen_release,
 /*      .ioctl  = hwmsen_ioctl,*/
 	.unlocked_ioctl = hwmsen_unlocked_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = hwmsen_compat_ioctl,
+#endif
 };
 
 /*----------------------------------------------------------------------------*/

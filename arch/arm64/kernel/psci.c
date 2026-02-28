@@ -22,6 +22,7 @@
 #include <linux/pm.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
 #include <uapi/linux/psci.h>
 
 #include <asm/compiler.h>
@@ -31,13 +32,16 @@
 #include <asm/smp_plat.h>
 #include <asm/suspend.h>
 #include <asm/system_misc.h>
-#include <mtk_hibernate_core.h>
+#include <mt-plat/mtk_ram_console.h>
 #ifdef CONFIG_ARCH_MT6797
 #include <mt6797/da9214.h>
 #include <mach/mt_freqhopping.h>
+#include <mt_dcm.h>
 #include <mt_clkmgr.h>
 #include <mt_idvfs.h>
 #include <mt_ocp.h>
+#include <mt6797/mt_wdt.h>
+#include <ext_wd_drv.h>
 #endif
 
 #ifdef MTK_IRQ_NEW_DESIGN
@@ -49,17 +53,15 @@
 
 #ifdef CONFIG_ARCH_MT6797
 #define MT6797_SPM_BASE_ADDR		0x10006000
-#define MT6797_WDT_BASE_ADDR		0x10007000
 #define MT6797_IDVFS_BASE_ADDR		0x10222000
 
 #define CONFIG_CL2_BUCK_CTRL	1
 #define CONFIG_ARMPLL_CTRL	1
- #undef CONFIG_ARMPLL_CTRL
 #define CONFIG_OCP_IDVFS_CTRL	1
 
-int bypass_boot = 2;
+int bypass_boot = 0;
 int bypass_cl0_armpll = 3;
-int bypass_cl1_armpll = 4;
+int bypass_cl1_armpll = 1;	/* min(4, maxcpus - 4) */
 char g_cl0_online = 1;	/* cpu0 is online */
 char g_cl1_online = 0;
 char g_cl2_online = 0;
@@ -69,6 +71,12 @@ int ocp_cl0_init = 0;
 int ocp_cl1_init = 0;
 int idvfs_init = 0;
 #endif
+
+#ifdef CONFIG_CL2_BUCK_CTRL
+DEFINE_SPINLOCK(reset_lock);
+int reset_flags;
+#endif
+
 #endif
 
 struct psci_power_state {
@@ -92,6 +100,9 @@ static struct psci_operations psci_ops;
 
 static int (*invoke_psci_fn)(u64, u64, u64, u64);
 typedef int (*psci_initcall_t)(const struct device_node *);
+
+asmlinkage int __invoke_psci_fn_hvc(u64, u64, u64, u64);
+asmlinkage int __invoke_psci_fn_smc(u64, u64, u64, u64);
 
 enum psci_function {
 	PSCI_FN_CPU_SUSPEND,
@@ -143,40 +154,6 @@ static void psci_power_state_unpack(u32 power_state,
 	state->affinity_level =
 			(power_state & PSCI_0_2_POWER_STATE_AFFL_MASK) >>
 			PSCI_0_2_POWER_STATE_AFFL_SHIFT;
-}
-
-/*
- * The following two functions are invoked via the invoke_psci_fn pointer
- * and will not be inlined, allowing us to piggyback on the AAPCS.
- */
-static noinline int __invoke_psci_fn_hvc(u64 function_id, u64 arg0, u64 arg1,
-					 u64 arg2)
-{
-	asm volatile(
-			__asmeq("%0", "x0")
-			__asmeq("%1", "x1")
-			__asmeq("%2", "x2")
-			__asmeq("%3", "x3")
-			"hvc	#0\n"
-		: "+r" (function_id)
-		: "r" (arg0), "r" (arg1), "r" (arg2));
-
-	return function_id;
-}
-
-static noinline int __invoke_psci_fn_smc(u64 function_id, u64 arg0, u64 arg1,
-					 u64 arg2)
-{
-	asm volatile(
-			__asmeq("%0", "x0")
-			__asmeq("%1", "x1")
-			__asmeq("%2", "x2")
-			__asmeq("%3", "x3")
-			"smc	#0\n"
-		: "+r" (function_id)
-		: "r" (arg0), "r" (arg1), "r" (arg2));
-
-	return function_id;
 }
 
 static int psci_get_version(void)
@@ -489,25 +466,30 @@ static int __init cpu_psci_cpu_prepare(unsigned int cpu)
 static int cpu_power_on_buck(unsigned int cpu, bool hotplug)
 {
 	static void __iomem *reg_base;
-	unsigned int temp;
+	static volatile unsigned int temp;
 	int ret = 0;
 
-	pr_info("cpu_power_on_buck\n");
+	/* set reset_flags for OCP */
+	spin_lock(&reset_lock);
+	reset_flags = 1;
+	spin_unlock(&reset_lock);
+
 	reg_base = ioremap(MT6797_SPM_BASE_ADDR, 0x1000);
 	writel_relaxed((readl(reg_base + 0x218) | (1 << 0)), reg_base + 0x218);
 	iounmap(reg_base);
 
-	/* latch RESET */
-	reg_base = ioremap(MT6797_WDT_BASE_ADDR, 0x1000);
-	writel_relaxed((readl(reg_base + 0x018) | 0x88000800), reg_base + 0x018);
+	reg_base = ioremap(MT6797_IDVFS_BASE_ADDR, 0x1000);	/* 0x102224a0 */
+	temp = readl(reg_base + 0x4a0); /* dummy read */
 	iounmap(reg_base);
 
-	if (hotplug) {
-		pr_info("power on vproc\n");
-		ret = da9214_config_interface(0x0, 0x0, 0xF, 0);
-		ret = da9214_config_interface(0x5E, 0x1, 0x1, 0);
+	/* latch RESET */
+	mtk_wdt_swsysret_config(MTK_WDT_SWSYS_RST_PWRAP_SPI_CTL_RST, 1);
 
-		mdelay(10);
+	if (hotplug) {
+		BUG_ON(da9214_config_interface(0x0, 0x0, 0xF, 0) < 0);
+		BUG_ON(da9214_config_interface(0x5E, 0x1, 0x1, 0) < 0);
+
+		udelay(1000);
 	}
 
 	/* EXT_BUCK_ISO */
@@ -516,32 +498,29 @@ static int cpu_power_on_buck(unsigned int cpu, bool hotplug)
 	iounmap(reg_base);
 
 	/* unlatch RESET */
-	reg_base = ioremap(MT6797_WDT_BASE_ADDR, 0x1000);
-	temp = (readl(reg_base + 0x018) & ~(0x0800)) | 0x88000000;
-	writel_relaxed(temp, reg_base + 0x018);
-	iounmap(reg_base);
+	mtk_wdt_swsysret_config(MTK_WDT_SWSYS_RST_PWRAP_SPI_CTL_RST, 0);
 
-	pr_info("power on vsram (%d) (max:%d)\n", cpu, num_possible_cpus());
-	reg_base = ioremap(MT6797_IDVFS_BASE_ADDR, 0x1000);
-	writel_relaxed((readl(reg_base + 0x2b0) | (0xf << 4)), reg_base + 0x2b0);
-	iounmap(reg_base);
+	/* clear reset_flags for OCP */
+	spin_lock(&reset_lock);
+	reset_flags = 0;
+	spin_unlock(&reset_lock);
+
+	/* set VSRAM enable, cal_eFuse, rsh = 0x0f -> 0x08 */
+	udelay(240);
+	BigiDVFSSRAMLDOSet(110000);
+	udelay(240);
 
 	return ret;
 }
 
 static int cpu_power_off_buck(unsigned int cpu)
 {
-	static void __iomem *reg_base;
 	int ret = 0;
 
-	pr_info("power down vproc (%d)\n", cpu);
 	ret = da9214_config_interface(0x0, 0x0, 0xF, 0);
 	ret = da9214_config_interface(0x5E, 0x0, 0x1, 0);
 
-	pr_info("power down vsram\n");
-	reg_base = ioremap(MT6797_IDVFS_BASE_ADDR, 0x1000);
-	writel_relaxed((readl(reg_base + 0x02B0) & ~(0xf << 4)), reg_base + 0x02B0);
-	iounmap(reg_base);
+	BigiDVFSSRAMLDODisable();
 
 	return ret;
 }
@@ -553,20 +532,21 @@ static int cpu_psci_cpu_boot(unsigned int cpu)
 #ifdef CONFIG_ARCH_MT6797
 	int err = 0;
 
+
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+	TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+
 	if ((cpu == 0) || (cpu == 1) || (cpu == 2) || (cpu == 3)) {
 		if (bypass_cl0_armpll > 0) {
 			bypass_cl0_armpll--;
 		} else {
 			if (!g_cl0_online) {
-				pr_info("boot cluster0\n");
 #ifdef CONFIG_ARMPLL_CTRL
 				/* turn on arm pll */
 				enable_armpll_ll();
 				/* non-pause FQHP function */
 				mt_pause_armpll(MCU_FH_PLL0, 0);
-				mt_pause_armpll(MCU_FH_PLL1, 0);
-				mt_pause_armpll(MCU_FH_PLL2, 0);
-				mt_pause_armpll(MCU_FH_PLL3, 0);
 				/* switch to HW mode */
 				switch_armpll_ll_hwmode(1);
 #endif
@@ -577,15 +557,11 @@ static int cpu_psci_cpu_boot(unsigned int cpu)
 			bypass_cl1_armpll--;
 		} else {
 			if (!g_cl1_online) {
-				pr_info("boot cluster1\n");
 #ifdef CONFIG_ARMPLL_CTRL
 				/* turn on arm pll */
 				enable_armpll_l();
 				/* non-pause FQHP function */
-				mt_pause_armpll(MCU_FH_PLL0, 0);
 				mt_pause_armpll(MCU_FH_PLL1, 0);
-				mt_pause_armpll(MCU_FH_PLL2, 0);
-				mt_pause_armpll(MCU_FH_PLL3, 0);
 				/* switch to HW mode */
 				switch_armpll_l_hwmode(1);
 #endif
@@ -600,7 +576,6 @@ static int cpu_psci_cpu_boot(unsigned int cpu)
 			bypass_boot--;
 		} else {
 			if (!g_cl2_online) {
-				pr_info("boot cluster2\n");
 #ifdef CONFIG_CL2_BUCK_CTRL
 				cpu_power_on_buck(cpu, 1);
 #endif
@@ -608,24 +583,35 @@ static int cpu_psci_cpu_boot(unsigned int cpu)
 		}
 	}
 
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+	TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+
 	err = psci_ops.cpu_on(cpu_logical_map(cpu), __pa(secondary_entry));
 
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+	TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+
+	if ((cpu == 8) || (cpu == 9)) {
+		if (!g_cl2_online) {
+			/* enable MP2 Sync DCM */
+			dcm_mcusys_mp2_sync_dcm(1);
+		}
+	}
 #ifdef CONFIG_OCP_IDVFS_CTRL
 	if ((cpu == 0) || (cpu == 1) || (cpu == 2) || (cpu == 3)) {
 		if (!ocp_cl0_init) {
-			pr_err("OXOXOX %s %d OXOXOX\n", __func__, __LINE__);
 			Cluster0_OCP_ON();
 			ocp_cl0_init = 1;
 		}
 	} else if ((cpu == 4) || (cpu == 5) || (cpu == 6) || (cpu == 7)) {
 		if (!ocp_cl1_init) {
-			pr_err("OXOXOX %s %d OXOXOX\n", __func__, __LINE__);
 			Cluster1_OCP_ON();
 			ocp_cl1_init = 1;
 		}
 	} else if ((cpu == 8) || (cpu == 9)) {
 		if (!idvfs_init) {
-			pr_err("OXOXOX %s %d OXOXOX\n", __func__, __LINE__);
 			BigiDVFSEnable_hp();
 			idvfs_init = 1;
 		}
@@ -643,8 +629,13 @@ static int cpu_psci_cpu_boot(unsigned int cpu)
 			g_cl2_online |= (1 << (cpu - 8));
 	}
 
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+	TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+	/* shrink kernel log
 	pr_info("boot CPU%d (0x%x, 0x%x, 0x%x)\n",
 		cpu, g_cl0_online, g_cl1_online, g_cl2_online);
+	*/
 #else
 	int err = psci_ops.cpu_on(cpu_logical_map(cpu), __pa(secondary_entry));
 	if (err)
@@ -693,15 +684,11 @@ static int cpu_kill_pll_buck_ctrl(unsigned int cpu)
 	if ((cpu == 0) || (cpu == 1) || (cpu == 2) || (cpu == 3)) {
 		g_cl0_online &= ~(1 << cpu);
 		if (!g_cl0_online) {
-			pr_info("cluster0 down\n");
 #ifdef CONFIG_ARMPLL_CTRL
 			/* switch to SW mode */
 			switch_armpll_ll_hwmode(0);
 			/* pause FQHP function */
 			mt_pause_armpll(MCU_FH_PLL0, 1);
-			mt_pause_armpll(MCU_FH_PLL1, 1);
-			mt_pause_armpll(MCU_FH_PLL2, 1);
-			mt_pause_armpll(MCU_FH_PLL3, 1);
 			/* turn off arm pll */
 			disable_armpll_ll();
 #endif
@@ -709,28 +696,63 @@ static int cpu_kill_pll_buck_ctrl(unsigned int cpu)
 	} else if ((cpu == 4) || (cpu == 5) || (cpu == 6) || (cpu == 7)) {
 		g_cl1_online &= ~(1 << (cpu - 4));
 		if (!g_cl1_online) {
-			pr_info("cluster1 down\n");
 #ifdef CONFIG_ARMPLL_CTRL
 			/* switch to SW mode */
 			switch_armpll_l_hwmode(0);
 			/* pause FQHP function */
-			mt_pause_armpll(MCU_FH_PLL0, 1);
 			mt_pause_armpll(MCU_FH_PLL1, 1);
-			mt_pause_armpll(MCU_FH_PLL2, 1);
-			mt_pause_armpll(MCU_FH_PLL3, 1);
 			/* turn off arm pll */
 			disable_armpll_l();
 #endif
 		}
 	} else if ((cpu == 8) || (cpu == 9)) {
-		g_cl2_online &= ~(1 << (cpu - 8));
+		/* update g_cl2_online before dcm_mcusys_mp2_sync_dcm(0) */
+		/* g_cl2_online &= ~(1 << (cpu - 8)); */
 		if (!g_cl2_online) {
-			pr_info("cluster2 down\n");
 #ifdef CONFIG_CL2_BUCK_CTRL
 			ret = cpu_power_off_buck(cpu);
 #endif
 		}
 	}
+
+	return ret;
+}
+#endif
+
+#ifdef CONFIG_ARCH_MT6797
+unsigned int last_cl0_online_cpus(unsigned int cpu)
+{
+	int ret = 0;
+
+	if (((cpu == 0) && (g_cl0_online == 1)) ||
+	    ((cpu == 1) && (g_cl0_online == 2)) ||
+	    ((cpu == 2) && (g_cl0_online == 4)) ||
+	    ((cpu == 3) && (g_cl0_online == 8)))
+			ret = 1;
+
+	return ret;
+}
+
+unsigned int last_cl1_online_cpus(unsigned int cpu)
+{
+	int ret = 0;
+
+	if (((cpu == 4) && (g_cl1_online == 1)) ||
+	    ((cpu == 5) && (g_cl1_online == 2)) ||
+	    ((cpu == 6) && (g_cl1_online == 4)) ||
+	    ((cpu == 7) && (g_cl1_online == 8)))
+			ret = 1;
+
+	return ret;
+}
+
+unsigned int last_cl2_online_cpus(unsigned int cpu)
+{
+	int ret = 0;
+
+	if (((cpu == 8) && (g_cl2_online == 1)) ||
+	    ((cpu == 9) && (g_cl2_online == 2)))
+			ret = 1;
 
 	return ret;
 }
@@ -749,36 +771,84 @@ static int cpu_psci_cpu_kill(unsigned int cpu)
 	 */
 
 	for (i = 0; i < 10; i++) {
+#ifdef CONFIG_ARCH_MT6797
 #ifdef CONFIG_OCP_IDVFS_CTRL
-		if (cpu == 8 && idvfs_init) {
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+		TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+
+		aee_rr_rec_hotplug_footprint(cpu, 81);
+		if (idvfs_init && last_cl2_online_cpus(cpu)) {
 			BigiDVFSDisable_hp();
 			idvfs_init = 0;
 		}
 
-		if (cpu == 0 && ocp_cl0_init) {
-			LittleOCPDisable(0);
+		aee_rr_rec_hotplug_footprint(cpu, 82);
+		if (ocp_cl0_init && last_cl0_online_cpus(cpu)) {
+			Cluster0_OCP_OFF();
 			ocp_cl0_init = 0;
 		}
 
-		if (cpu == 4 && ocp_cl1_init) {
-			LittleOCPDisable(1);
+		aee_rr_rec_hotplug_footprint(cpu, 83);
+		if (ocp_cl1_init && last_cl1_online_cpus(cpu)) {
+			Cluster1_OCP_OFF();
 			ocp_cl1_init = 0;
+		}
+
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+		TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+#endif
+#endif
+
+#ifdef CONFIG_ARCH_MT6797
+		if ((cpu == 8) || (cpu == 9)) {
+			g_cl2_online &= ~(1 << (cpu - 8));
+			if (!g_cl2_online) {
+				aee_rr_rec_hotplug_footprint(cpu, 84);
+				/* disable MP2 Sync DCM */
+				dcm_mcusys_mp2_sync_dcm(0);
+			}
 		}
 #endif
 
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+		TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+
+		aee_rr_rec_hotplug_footprint(cpu, 85);
 		err = psci_ops.affinity_info(cpu_logical_map(cpu), 0);
+
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+		TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
+
+		aee_rr_rec_hotplug_footprint(cpu, 86);
 		if (err == PSCI_0_2_AFFINITY_LEVEL_OFF) {
+#ifndef CONFIG_ARCH_MT6797
+			aee_rr_rec_hotplug_footprint(cpu, 87);
 			pr_info("CPU%d killed.\n", cpu);
+#endif
 #ifdef CONFIG_ARCH_MT6797
+
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+		TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
 			cpu_kill_pll_buck_ctrl(cpu);
+
+#ifdef CONFIG_MTK_CPU_HOTPLUG_DEBUG_3
+		TIMESTAMP_REC(hotplug_ts_rec, TIMESTAMP_FILTER,  cpu, 0, 0, 0);
+#endif
 #endif
 			return 1;
 		}
 
+		aee_rr_rec_hotplug_footprint(cpu, 88);
 		msleep(10);
 		pr_info("Retrying again to check for CPU kill\n");
 	}
 
+	aee_rr_rec_hotplug_footprint(cpu, 89);
 	pr_warn("CPU%d may not have shut down cleanly (AFFINITY_INFO reports %d)\n",
 			cpu, err);
 	/* Make op_cpu_kill() fail. */

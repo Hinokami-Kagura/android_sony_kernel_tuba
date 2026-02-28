@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifdef WIN32
 #include "win_test.h"
 #include "stdio.h"
@@ -23,12 +36,13 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
+#include "kd_flashlight_type.h"
 #include <linux/cdev.h>
 #include <linux/errno.h>
 #include <linux/time.h>
+#include <linux/mutex.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
-#include "kd_camera_typedef.h"
 #include <mach/upmu_sw.h>
 #endif
 #ifdef CONFIG_COMPAT
@@ -57,7 +71,7 @@
 #define PK_DBG_NONE(fmt, arg...)    do {} while (0)
 #define PK_DBG_FUNC(fmt, arg...)    pr_debug(PFX "%s: " fmt, __func__ , ##arg)
 
-/*#define DEBUG_KD_STROBE*/
+#define DEBUG_KD_STROBE
 #ifdef DEBUG_KD_STROBE
 #define logI PK_DBG_FUNC
 #else
@@ -71,6 +85,110 @@ static FLASHLIGHT_FUNCTION_STRUCT
 	*g_pFlashInitFunc[e_Max_Sensor_Dev_Num][e_Max_Strobe_Num_Per_Dev][e_Max_Part_Num_Per_Dev];
 static int gLowBatDuty[e_Max_Sensor_Dev_Num][e_Max_Strobe_Num_Per_Dev];
 static int g_strobePartId[e_Max_Sensor_Dev_Num][e_Max_Strobe_Num_Per_Dev];
+static DEFINE_MUTEX(g_mutex);
+/* ============================== */
+/* Pinctrl */
+/* ============================== */
+static struct pinctrl *flashlight_pinctrl;
+static struct pinctrl_state *flashlight_hwen_high;
+static struct pinctrl_state *flashlight_hwen_low;
+static struct pinctrl_state *flashlight_torch_high;
+static struct pinctrl_state *flashlight_torch_low;
+static struct pinctrl_state *flashlight_flash_high;
+static struct pinctrl_state *flashlight_flash_low;
+
+int flashlight_gpio_init(struct platform_device *pdev)
+{
+	int ret = 0;
+
+	flashlight_pinctrl = devm_pinctrl_get(&pdev->dev);
+	if (IS_ERR(flashlight_pinctrl)) {
+		logI("Cannot find flashlight pinctrl!");
+		ret = PTR_ERR(flashlight_pinctrl);
+	}
+	/* Flashlight HWEN pin initialization */
+	flashlight_hwen_high = pinctrl_lookup_state(flashlight_pinctrl, "hwen_high");
+	if (IS_ERR(flashlight_hwen_high)) {
+		ret = PTR_ERR(flashlight_hwen_high);
+		logI("%s : init err, flashlight_hwen_high\n", __func__);
+	}
+
+	flashlight_hwen_low = pinctrl_lookup_state(flashlight_pinctrl, "hwen_low");
+	if (IS_ERR(flashlight_hwen_low)) {
+		ret = PTR_ERR(flashlight_hwen_low);
+		logI("%s : init err, flashlight_hwen_low\n", __func__);
+	}
+
+	/* Flashlight TORCH pin initialization */
+	flashlight_torch_high = pinctrl_lookup_state(flashlight_pinctrl, "torch_high");
+	if (IS_ERR(flashlight_torch_high)) {
+		ret = PTR_ERR(flashlight_torch_high);
+		logI("%s : init err, flashlight_torch_high\n", __func__);
+	}
+
+	flashlight_torch_low = pinctrl_lookup_state(flashlight_pinctrl, "torch_low");
+	if (IS_ERR(flashlight_torch_low)) {
+		ret = PTR_ERR(flashlight_torch_low);
+		logI("%s : init err, flashlight_torch_low\n", __func__);
+	}
+
+	/* Flashlight FLASH pin initialization */
+	flashlight_flash_high = pinctrl_lookup_state(flashlight_pinctrl, "flash_high");
+	if (IS_ERR(flashlight_flash_high)) {
+		ret = PTR_ERR(flashlight_flash_high);
+		logI("%s : init err, flashlight_flash_high\n", __func__);
+	}
+
+	flashlight_flash_low = pinctrl_lookup_state(flashlight_pinctrl, "flash_low");
+	if (IS_ERR(flashlight_flash_low)) {
+		ret = PTR_ERR(flashlight_flash_low);
+		logI("%s : init err, flashlight_flash_low\n", __func__);
+	}
+
+	return ret;
+}
+
+int flashlight_gpio_set(int pin , int state)
+{
+	int ret = 0;
+
+	if (IS_ERR(flashlight_pinctrl)) {
+		logI("%s : set err, flashlight_pinctrl not available\n", __func__);
+		return -1;
+	}
+
+	switch (pin) {
+	case FLASHLIGHT_PIN_HWEN:
+		if (state == STATE_LOW && !IS_ERR(flashlight_hwen_low))
+			pinctrl_select_state(flashlight_pinctrl, flashlight_hwen_low);
+		else if (state == STATE_HIGH && !IS_ERR(flashlight_hwen_high))
+			pinctrl_select_state(flashlight_pinctrl, flashlight_hwen_high);
+		else
+			logI("%s : set err, pin(%d) state(%d)\n", __func__, pin, state);
+		break;
+	case FLASHLIGHT_PIN_TORCH:
+		if (state == STATE_LOW && !IS_ERR(flashlight_torch_low))
+			pinctrl_select_state(flashlight_pinctrl, flashlight_torch_low);
+		else if (state == STATE_HIGH && !IS_ERR(flashlight_torch_high))
+			pinctrl_select_state(flashlight_pinctrl, flashlight_torch_high);
+		else
+			logI("%s : set err, pin(%d) state(%d)\n", __func__, pin, state);
+		break;
+	case FLASHLIGHT_PIN_FLASH:
+		if (state == STATE_LOW && !IS_ERR(flashlight_flash_low))
+			pinctrl_select_state(flashlight_pinctrl, flashlight_flash_low);
+		else if (state == STATE_HIGH && !IS_ERR(flashlight_flash_high))
+			pinctrl_select_state(flashlight_pinctrl, flashlight_flash_high);
+		else
+			logI("%s : set err, pin(%d) state(%d)\n", __func__, pin, state);
+		break;
+	default:
+			logI("%s : set err, pin(%d) state(%d)\n", __func__, pin, state);
+		break;
+	}
+	logI("%s : pin(%d) state(%d)\n", __func__, pin, state);
+	return ret;
+}
 
 /* ============================== */
 /* functions */
@@ -99,6 +217,7 @@ extern void timerInit(void);
 
 extern int g_duty;
 //CEI comments end
+
 int globalInit(void)
 {
 	int i;
@@ -122,6 +241,7 @@ int checkAndRelease(void)
 	int j;
 	int k;
 
+	mutex_lock(&g_mutex);
 	for (i = 0; i < e_Max_Sensor_Dev_Num; i++)
 		for (j = 0; j < e_Max_Strobe_Num_Per_Dev; j++)
 			for (k = 0; k < e_Max_Part_Num_Per_Dev; k++) {
@@ -131,6 +251,7 @@ int checkAndRelease(void)
 					g_pFlashInitFunc[i][j][k] = 0;
 				}
 			}
+	mutex_unlock(&g_mutex);
 	return 0;
 }
 
@@ -308,7 +429,8 @@ static int closeFlash(void)
 	int j;
 	int k;
 
-	logI("closeFlash ln=%d", __LINE__);
+	mutex_lock(&g_mutex);
+	logI("closeFlash due to low power ln=%d", __LINE__);
 	for (i = 0; i < e_Max_Sensor_Dev_Num; i++) {
 		/* logI("closeFlash ln=%d %d",__LINE__,i); */
 		for (j = 0; j < e_Max_Strobe_Num_Per_Dev; j++) {
@@ -316,13 +438,13 @@ static int closeFlash(void)
 			for (k = 0; k < e_Max_Part_Num_Per_Dev; k++) {
 				/* logI("closeFlash ln=%d %d %d",__LINE__,k, (int)g_pFlashInitFunc[i][j][k]); */
 				if (g_pFlashInitFunc[i][j][k] != 0) {
-					logI("closeFlash i,j,k %d %d %d", i, j, k);
 					g_pFlashInitFunc[i][j][k]->flashlight_ioctl
 					    (FLASH_IOC_SET_ONOFF, 0);
 				}
 			}
 		}
 	}
+	mutex_unlock(&g_mutex);
 	return 0;
 }
 
@@ -341,10 +463,6 @@ static int gLowPowerVbat = LOW_BATTERY_LEVEL_0;
 
 static void Lbat_protection_powerlimit_flash(LOW_BATTERY_LEVEL level)
 {
-	logI("Lbat_protection_powerlimit_flash %d (%d %d %d %d)\n", level, LOW_BATTERY_LEVEL_0,
-	     LOW_BATTERY_LEVEL_1, LOW_BATTERY_LEVEL_2, __LINE__);
-	logI("Lbat_protection_powerlimit_flash %d (%d %d %d %d)\n", level, LOW_BATTERY_LEVEL_0,
-	     LOW_BATTERY_LEVEL_1, LOW_BATTERY_LEVEL_2, __LINE__);
 	if (level == LOW_BATTERY_LEVEL_0) {
 		gLowPowerVbat = LOW_BATTERY_LEVEL_0;
 	} else if (level == LOW_BATTERY_LEVEL_1) {
@@ -365,10 +483,6 @@ static int gLowPowerPer = BATTERY_PERCENT_LEVEL_0;
 
 static void bat_per_protection_powerlimit_flashlight(BATTERY_PERCENT_LEVEL level)
 {
-	logI("bat_per_protection_powerlimit_flashlight %d (%d %d %d)\n", level,
-	     BATTERY_PERCENT_LEVEL_0, BATTERY_PERCENT_LEVEL_1, __LINE__);
-	logI("bat_per_protection_powerlimit_flashlight %d (%d %d %d)\n", level,
-	     BATTERY_PERCENT_LEVEL_0, BATTERY_PERCENT_LEVEL_1, __LINE__);
 	if (level == BATTERY_PERCENT_LEVEL_0) {
 		gLowPowerPer = BATTERY_PERCENT_LEVEL_0;
 	} else if (level == BATTERY_PERCENT_LEVEL_1) {
@@ -385,8 +499,6 @@ static int gLowPowerOc=BATTERY_OC_LEVEL_0;
 
 void bat_oc_protection_powerlimit(BATTERY_OC_LEVEL level)
 {
-    logI("bat_oc_protection_powerlimit %d (%d %d %d)\n", level, BATTERY_OC_LEVEL_0, BATTERY_OC_LEVEL_1,__LINE__);
-    logI("bat_oc_protection_powerlimit %d (%d %d %d)\n", level, BATTERY_OC_LEVEL_0, BATTERY_OC_LEVEL_1,__LINE__);
     if (level == BATTERY_OC_LEVEL_1){
 	closeFlash();
 	gLowPowerOc=BATTERY_OC_LEVEL_1;
@@ -715,7 +827,7 @@ static struct class *flashlight_class;
 static struct device *flashlight_device;
 static struct flashlight_data flashlight_private;
 static dev_t flashlight_devno;
-static struct cdev flashlight_cdev;
+static struct cdev *g_pFlash_CharDrv;
 //CEI comments start
 
 static unsigned int g_flash = 0, g_torch = 0;
@@ -859,9 +971,18 @@ static int flashlight_probe(struct platform_device *dev)
 		logI("[flashlight_probe] major: %d, minor: %d ~", MAJOR(flashlight_devno),
 		     MINOR(flashlight_devno));
 	}
-	cdev_init(&flashlight_cdev, &flashlight_fops);
-	flashlight_cdev.owner = THIS_MODULE;
-	err = cdev_add(&flashlight_cdev, flashlight_devno, 1);
+	/* Allocate driver */
+	g_pFlash_CharDrv = cdev_alloc();
+	if (NULL == g_pFlash_CharDrv) {
+		unregister_chrdev_region(flashlight_devno, 1);
+
+		logI("Allocate mem for kobject failed\n");
+
+		return -1;
+	}
+	cdev_init(g_pFlash_CharDrv, &flashlight_fops);
+	g_pFlash_CharDrv->owner = THIS_MODULE;
+	err = cdev_add(g_pFlash_CharDrv, flashlight_devno, 1);
 	if (err) {
 		logI("[flashlight_probe] cdev_add fail: %d ~", err);
 		goto flashlight_probe_error;
@@ -918,13 +1039,16 @@ static int flashlight_probe(struct platform_device *dev)
 	/* init_MUTEX(&flashlight_private.sem); */
 	sema_init(&flashlight_private.sem, 1);
 
+	/* GPIO pinctrl initial */
+	flashlight_gpio_init(dev);
+
 	logI("[flashlight_probe] Done ~");
 	return 0;
 
 flashlight_probe_error:
 #ifdef ALLOC_DEVNO
 	if (err == 0)
-		cdev_del(&flashlight_cdev);
+		cdev_del(g_pFlash_CharDrv);
 	if (ret == 0)
 		unregister_chrdev_region(flashlight_devno, 1);
 #else
@@ -940,7 +1064,7 @@ static int flashlight_remove(struct platform_device *dev)
 	logI("[flashlight_probe] start\n");
 
 #ifdef ALLOC_DEVNO
-	cdev_del(&flashlight_cdev);
+	cdev_del(g_pFlash_CharDrv);
 	unregister_chrdev_region(flashlight_devno, 1);
 #else
 	unregister_chrdev(MAJOR(flashlight_devno), FLASHLIGHT_DEVNAME);
@@ -960,6 +1084,13 @@ static void flashlight_shutdown(struct platform_device *dev)
 	logI("[flashlight_shutdown] Done ~");
 }
 
+#ifdef CONFIG_OF
+static const struct of_device_id FLASHLIGHT_of_match[] = {
+	{.compatible = "mediatek,mt6755-flashlight"},
+	{},
+};
+#endif
+
 static struct platform_driver flashlight_platform_driver = {
 	.probe = flashlight_probe,
 	.remove = flashlight_remove,
@@ -967,6 +1098,9 @@ static struct platform_driver flashlight_platform_driver = {
 	.driver = {
 		   .name = FLASHLIGHT_DEVNAME,
 		   .owner = THIS_MODULE,
+#ifdef CONFIG_OF
+	.of_match_table = FLASHLIGHT_of_match,
+#endif
 		   },
 };
 

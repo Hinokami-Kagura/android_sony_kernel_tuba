@@ -62,7 +62,9 @@
 #include <linux/i2c.h>
 #include <linux/sched.h>
 #include <linux/kthread.h>
-#include <linux/rtpm_prio.h>
+//colby modify for Android N start
+//#include <linux/rtpm_prio.h>
+//colby modify for Android N end
 #include <linux/wait.h>
 #include <linux/time.h>
 #include <linux/delay.h>
@@ -2470,7 +2472,10 @@ int   err = 0;
 
 static int touch_event_handler(void *unused)
 {
-struct sched_param  param = { .sched_priority = RTPM_PRIO_TPD };
+//colby modify for Android N start
+//struct sched_param  param = { .sched_priority = RTPM_PRIO_TPD };
+struct sched_param  param = { .sched_priority = 4 };
+//colby modify for Android N end
 //unsigned long time_eclapse; //colby mask 20151001
 int   rc;
 //int   touch_state = 3; //colby mask 20151001

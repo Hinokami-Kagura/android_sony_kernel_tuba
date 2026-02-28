@@ -39,7 +39,7 @@ static void initTimer(struct hrtimer *timer, enum hrtimer_restart (*callback)(st
 
 static void startTimer(struct hrtimer *timer, int delay_ms, bool first)
 {
-	struct acc_context *obj = (struct acc_context *)container_of(timer, struct acc_context, hrTimer);
+	struct mag_context *obj = (struct mag_context *)container_of(timer, struct mag_context, hrTimer);
 
 	if (obj == NULL) {
 		MAG_ERR("NULL pointer\n");
@@ -83,7 +83,7 @@ static void mag_work_func(struct work_struct *work)
 	get_monotonic_boottime(&time);
 	cur_ns = time.tv_sec*1000000000LL+time.tv_nsec;
 
-#if 1
+#if 1   //henry add for DMS06710308 Screen activation from sleep mode is extremely slow
     if(g_iAddSkipMag ==1)
     {
 	ii = atomic_read(&g_iIsSuspend);
@@ -600,9 +600,14 @@ static ssize_t mag_show_sensordevnum(struct device *dev,
 	int ret;
 	struct mag_context *cxt = NULL;
 	const char *devname = NULL;
+	struct input_handle *handle;
 
 	cxt = mag_context_obj;
-	devname = dev_name(&cxt->idev->dev);
+	list_for_each_entry(handle, &cxt->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
 	ret = sscanf(devname+5, "%d", &devnum);
 	return snprintf(buf, PAGE_SIZE, "%d\n", devnum);
 }
@@ -959,6 +964,7 @@ static int mag_misc_init(struct mag_context *cxt)
 	return err;
 }
 
+/*
 static void mag_input_destroy(struct mag_context *cxt)
 {
 	struct input_dev *dev = cxt->idev;
@@ -966,6 +972,7 @@ static void mag_input_destroy(struct mag_context *cxt)
 	input_unregister_device(dev);
 	input_free_device(dev);
 }
+*/
 
 static int mag_input_init(struct mag_context *cxt)
 {
@@ -1191,7 +1198,14 @@ int mag_data_report(enum MAG_TYPE type, int x, int y, int z, int status, int64_t
 
 	return 0;
 }
-
+int magnetic_data_report(int x, int y, int z, int status, int64_t nt)
+{
+	return mag_data_report(MAGNETIC, x, y, z, status, nt);
+}
+int orientation_data_report(int x, int y, int z, int status, int64_t nt)
+{
+	return mag_data_report(ORIENTATION, x, y, z, status, nt);
+}
 static int mag_probe(void)
 {
 	int err;
@@ -1208,7 +1222,7 @@ static int mag_probe(void)
 	err = mag_real_driver_init();
 	if (err) {
 		MAG_ERR("mag_real_driver_init fail\n");
-		goto exit_alloc_data_failed;
+		goto real_driver_init_fail;
 	}
 
 	err = mag_factory_device_init();
@@ -1228,11 +1242,12 @@ static int mag_probe(void)
 	MAG_LOG("----magel_probe OK !!\n");
 	return 0;
 
+real_driver_init_fail:
 exit_alloc_input_dev_failed:
-	mag_input_destroy(mag_context_obj);
+	kfree(mag_context_obj);
 
 exit_alloc_data_failed:
-	kfree(mag_context_obj);
+
 	MAG_ERR("----magel_probe fail !!!\n");
 	return err;
 }

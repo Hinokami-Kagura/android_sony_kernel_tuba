@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -67,7 +80,7 @@ static struct musb_hdrc_config mtu3d_config = {
 	.fifo_cfg_size = ARRAY_SIZE(mtu3d_cfg),
 };
 
-#ifdef CONFIG_USB_MTK_DUALMODE
+#if defined(CONFIG_USB_MTK_DUALMODE) && !defined(CONFIG_USB_MTK_OTG_SWITCH)
 static struct pinctrl *pinctrl;
 static struct pinctrl_state *pinctrl_iddig;
 #endif
@@ -130,7 +143,7 @@ void init_check_ltssm_work(void)
 void check_ltssm_work(struct work_struct *data)
 {
 	/* struct musb *musb = container_of(to_delayed_work(data), struct musb, check_ltssm_work); */
-#ifndef CONFIG_USBIF_COMPLIANCE
+#if !defined(CONFIG_USBIF_COMPLIANCE) && !defined(U3_COMPLIANCE)
 	os_printk(K_INFO, "%s %x\n", __func__, sts_ltssm);
 
 	if (sts_ltssm == RXDET_SUCCESS_INTR) {
@@ -154,10 +167,16 @@ void reconnect_work(struct work_struct *data)
 	os_printk(K_INFO, "%s\n", __func__);
 
 	/* Disable U2 detect */
-	mu3d_hal_u3dev_dis();
-	mu3d_hal_u2dev_disconn();
-	mdelay(1000);
-	mu3d_hal_u3dev_en();
+#ifdef SUPPORT_U3
+	if (musb_speed) {
+#endif
+		mu3d_hal_u3dev_dis();
+		mu3d_hal_u2dev_disconn();
+		mdelay(1000);
+		mu3d_hal_u3dev_en();
+#ifdef SUPPORT_U3
+	}
+#endif
 }
 #endif
 
@@ -688,7 +707,7 @@ static void mtu3d_musb_reg_init(struct musb *musb)
 	if (!u3phy_ops)
 		ret = u3phy_init();
 
-	if (ret || u3phy_ops) {
+	if (u3phy_ops) {
 
 #ifdef CONFIG_MTK_UART_USB_SWITCH
 		if (usb_phy_check_in_uart_mode()) {
@@ -703,7 +722,7 @@ static void mtu3d_musb_reg_init(struct musb *musb)
 
 		musb->is_clk_on = 1;
 
-#ifndef CONFIG_MTK_FPGA
+#ifndef CONFIG_FPGA_EARLY_PORTING
 		usb_phy_recover(musb->is_clk_on);
 #endif
 		/* USB 2.0 slew rate calibration */
@@ -791,7 +810,7 @@ static int mtu3d_probe(struct platform_device *pdev)
 		goto err2;
 	}
 
-#ifdef CONFIG_USB_MTK_DUALMODE
+#if defined(CONFIG_USB_MTK_DUALMODE) && !defined(CONFIG_USB_MTK_OTG_SWITCH)
 	pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (IS_ERR(pinctrl))
 		dev_err(&pdev->dev, "Cannot find usb pinctrl!\n");
@@ -800,7 +819,7 @@ static int mtu3d_probe(struct platform_device *pdev)
 		if (IS_ERR(pinctrl_iddig))
 			dev_err(&pdev->dev, "Cannot find usb pinctrl iddig_init\n");
 		else
-		pinctrl_select_state(pinctrl, pinctrl_iddig);
+			pinctrl_select_state(pinctrl, pinctrl_iddig);
 	}
 #endif
 

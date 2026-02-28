@@ -1,15 +1,36 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
 #ifndef _MT_PMIC_UPMU_SW_H_
 #define _MT_PMIC_UPMU_SW_H_
+
+#ifdef CONFIG_MTK_PMIC_NEW_ARCH
+
+#ifdef CONFIG_MTK_PMIC_CHIP_MT6353
+#include <mach/mt6353_hw.h>
+#include <mach/mt6353_sw.h>
+#endif
+
+#else
 #include <mach/upmu_hw.h>
 
-//CEI comment start// //Check//
-//#define AUXADC_SUPPORT_IMM_CURRENT_MODE
-//CEI comment end//
-#define BATTERY_DTS_SUPPORT
 //CEI comment start//
-//#define RBAT_PULL_UP_VOLT_BY_BIF
+//#define AUXADC_SUPPORT_IMM_CURRENT_MODE //marked
 //CEI comment end//
+/*#define BATTERY_DTS_SUPPORT*/
+#define RBAT_PULL_UP_VOLT_BY_BIF
 #define BATTERY_SW_INIT
+/* #define INIT_BAT_CUR_FROM_PTIM */
 
 #define FG_BAT_INT_H_NO 48
 #define FG_BAT_INT_L_NO 49
@@ -199,6 +220,9 @@ extern void pmu_drv_tool_customization_init(void);
 #endif
 extern int batt_init_cust_data(void);
 extern void PMIC_INIT_SETTING_V1(void);
+
+extern int do_ptim_ex(bool isSuspend, unsigned int *bat, signed int *cur);
+#endif
 
 #endif /* _MT_PMIC_UPMU_SW_H_ */
 

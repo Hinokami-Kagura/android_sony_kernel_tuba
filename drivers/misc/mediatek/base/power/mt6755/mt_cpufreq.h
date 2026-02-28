@@ -1,4 +1,17 @@
 /*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
+/*
  * @file mt_cpufreq.h
  * @brief CPU DVFS driver interface
  */
@@ -109,6 +122,9 @@ extern unsigned int mt_cpufreq_get_cur_phy_volt(enum mt_cpu_dvfs_id id);
 
 /* PPB */
 extern int mt_cpufreq_get_ppb_state(void);
+
+/* L hispeed */
+extern int mt_cpufreq_get_chip_id_38(void);
 
 /* DCM */
 extern int sync_dcm_set_cci_freq(unsigned int cci_hz);

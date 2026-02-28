@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
@@ -464,6 +477,74 @@ enum ppm_power_state ppm_change_state_with_fix_root_cluster(enum ppm_power_state
 	return new_state;
 }
 
+int ppm_get_table_idx_by_perf(enum ppm_power_state state, unsigned int perf_idx)
+{
+	int i;
+	struct ppm_power_state_data *state_info;
+	const struct ppm_state_sorted_pwr_tbl_data *tbl;
+	struct ppm_power_tbl_data power_table = ppm_get_power_table();
+
+	if (state > NR_PPM_POWER_STATE || (perf_idx == -1)) {
+		ppm_warn("Invalid argument: state = %d, pwr_idx = %d\n", state, perf_idx);
+		return -1;
+	}
+
+	/* search whole tlp table */
+	if (state == PPM_POWER_STATE_NONE) {
+		for (i = 1; i < power_table.nr_power_tbl; i++) {
+			if (power_table.power_tbl[i].perf_idx < perf_idx)
+				return power_table.power_tbl[i-1].index;
+		}
+	} else {
+		state_info = ppm_get_power_state_info();
+		tbl = state_info[state].perf_sorted_tbl;
+
+		/* return -1 (not found) if input is larger than max perf_idx in table */
+		if (tbl->sorted_tbl[0].value < perf_idx)
+			return -1;
+
+		for (i = 1; i < tbl->size; i++) {
+			if (tbl->sorted_tbl[i].value < perf_idx)
+				return tbl->sorted_tbl[i-1].index;
+		}
+	}
+
+	/* not found */
+	return -1;
+}
+
+int ppm_get_table_idx_by_pwr(enum ppm_power_state state, unsigned int pwr_idx)
+{
+	int i;
+	struct ppm_power_state_data *state_info;
+	const struct ppm_state_sorted_pwr_tbl_data *tbl;
+	struct ppm_power_tbl_data power_table = ppm_get_power_table();
+
+	if (state > NR_PPM_POWER_STATE || (pwr_idx == ~0)) {
+		ppm_warn("Invalid argument: state = %d, pwr_idx = %d\n", state, pwr_idx);
+		return -1;
+	}
+
+	/* search whole tlp table */
+	if (state == PPM_POWER_STATE_NONE) {
+		for_each_pwr_tbl_entry(i, power_table) {
+			if (power_table.power_tbl[i].power_idx <= pwr_idx)
+				return i;
+		}
+	} else {
+		state_info = ppm_get_power_state_info();
+		tbl = state_info[state].pwr_sorted_tbl;
+
+		for (i = 0; i < tbl->size; i++) {
+			if (tbl->sorted_tbl[i].value <= pwr_idx)
+				return tbl->sorted_tbl[i].advise_index;
+		}
+	}
+
+	/* not found */
+	return -1;
+}
+
 enum ppm_power_state ppm_find_next_state(enum ppm_power_state state,
 			unsigned int *level, enum power_state_search_policy policy)
 {
@@ -579,8 +660,12 @@ enum ppm_power_state ppm_judge_state_by_user_limit(enum ppm_power_state cur_stat
 			? state_info[cur_state].cluster_limit->state_limit[1].max_cpufreq_idx
 			: L_freq_max;
 		/* idx -> freq */
-		LL_freq_min = ppm_main_info.cluster_info[0].dvfs_tbl[LL_freq_min].frequency;
-		L_freq_max = ppm_main_info.cluster_info[1].dvfs_tbl[L_freq_max].frequency;
+		LL_freq_min = (ppm_main_info.cluster_info[0].dvfs_tbl)
+			? ppm_main_info.cluster_info[0].dvfs_tbl[LL_freq_min].frequency
+			: get_cluster_min_cpufreq_idx(0);
+		L_freq_max = (ppm_main_info.cluster_info[1].dvfs_tbl)
+			? ppm_main_info.cluster_info[1].dvfs_tbl[L_freq_max].frequency
+			: get_cluster_max_cpufreq_idx(1);
 	}
 
 	/* min_core <= 0: don't care */
@@ -660,9 +745,15 @@ void ppm_limit_check_for_user_limit(enum ppm_power_state cur_state, struct ppm_p
 		unsigned int sum = LL_min_core + L_min_core;
 		unsigned int LL_min_freq, L_min_freq, L_max_freq;
 
-		LL_min_freq = ppm_main_info.cluster_info[0].dvfs_tbl[req->limit[0].min_cpufreq_idx].frequency;
-		L_min_freq = ppm_main_info.cluster_info[1].dvfs_tbl[req->limit[1].min_cpufreq_idx].frequency;
-		L_max_freq = ppm_main_info.cluster_info[1].dvfs_tbl[req->limit[1].max_cpufreq_idx].frequency;
+		LL_min_freq = (ppm_main_info.cluster_info[0].dvfs_tbl)
+			? ppm_main_info.cluster_info[0].dvfs_tbl[req->limit[0].min_cpufreq_idx].frequency
+			: get_cluster_min_cpufreq_idx(0);
+		L_min_freq = (ppm_main_info.cluster_info[1].dvfs_tbl)
+			? ppm_main_info.cluster_info[1].dvfs_tbl[req->limit[1].min_cpufreq_idx].frequency
+			: get_cluster_min_cpufreq_idx(1);
+		L_max_freq = (ppm_main_info.cluster_info[1].dvfs_tbl)
+			? ppm_main_info.cluster_info[1].dvfs_tbl[req->limit[1].max_cpufreq_idx].frequency
+			: get_cluster_max_cpufreq_idx(1);
 
 		if (LL_min_core > 0 && L_max_freq >= LL_min_freq) {
 			/* user do not set L min so we just move LL core to L */
@@ -674,6 +765,13 @@ void ppm_limit_check_for_user_limit(enum ppm_power_state cur_state, struct ppm_p
 				req->limit[0].min_cpu_core = 0;
 				req->limit[1].min_cpu_core = sum;
 				ppm_ver("Judge: merge LL and L min core = %d\n", sum);
+#ifdef PPM_IC_SEGMENT_CHECK
+			} else if (ppm_main_info.fix_state_by_segment == PPM_POWER_STATE_L_ONLY) {
+				req->limit[0].min_cpu_core = 0;
+				req->limit[1].min_cpu_core = min(sum, get_cluster_max_cpu_core(1));
+				ppm_ver("Judge: merge LL and L min core = %d(sum = %d)\n",
+					req->limit[1].min_cpu_core, sum);
+#endif
 			} else {
 				ppm_ver("Judge: cannot merge to L! LL min = %d, L min = %d\n",
 					LL_min_core, L_min_core);
@@ -715,4 +813,25 @@ unsigned int ppm_get_root_cluster_by_state(enum ppm_power_state cur_state)
 
 	return root_cluster;
 }
+
+#ifdef PPM_IC_SEGMENT_CHECK
+enum ppm_power_state ppm_check_fix_state_by_segment(void)
+{
+	unsigned int segment = get_devinfo_with_index(21) & 0xFF;
+	enum ppm_power_state fix_state = PPM_POWER_STATE_NONE;
+
+	switch (segment) {
+	case 0x43: /* fix L only */
+	case 0x4B:
+		fix_state = PPM_POWER_STATE_L_ONLY;
+		break;
+	default:
+		break;
+	}
+
+	ppm_info("segment = 0x%x, fix_state = %s\n", segment, ppm_get_power_state_name(fix_state));
+
+	return fix_state;
+}
+#endif
 

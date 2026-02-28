@@ -14,7 +14,7 @@
 
 #ifndef _SLIMPORT_H
 #define _SLIMPORT_H
-
+#include "slimport_tx_drv.h"
 
 struct anx7805_platform_data
 {
@@ -84,9 +84,9 @@ const char *avdd33_name;
 
 
 
-#define D(fmt, arg...) printk("<1>```%s:%d: " fmt, __FUNCTION__, __LINE__, ##arg)
-#define debug_printf(fmt, arg...) printk(fmt,##arg)
-#define debug_puts(fmt) printk(fmt)
+#define D(fmt, arg...) pr_info("<1>```%s:%d: " fmt, __func__, __LINE__, ##arg)
+#define debug_printf(fmt, arg...) pr_info(fmt, ##arg)
+#define debug_puts(fmt) pr_info(fmt)
 #define delay_ms(time) mdelay(time)
 
 #define MIPI_EN  0
@@ -102,7 +102,7 @@ const char *avdd33_name;
 #define AUD_IN_SEL_1  0    
 #define AUD_IN_SEL_2  1
 #define SSC_EN   1
-#define HDCP_EN   1
+#define HDCP_EN   0
 
 #define BIST_EN 0
 
@@ -140,7 +140,8 @@ int sp_write_reg(uint8_t slave_addr, uint8_t offset, uint8_t value);
 void sp_tx_hardware_poweron(void);
 void sp_tx_hardware_powerdown(void);
 int slimport_read_edid_block(int block, uint8_t *edid_buf);
-int update_audio_format_setting(unsigned char  bAudio_Fs, unsigned char bAudio_word_len, int Channel_Num);
+int update_audio_format_setting(unsigned char  bAudio_Fs, unsigned char bAudio_word_len, int Channel_Num, I2SLayOut layout);
+int update_video_format_setting(int video_format);
 int slimport_read_edid_All(uint8_t *edid_buf);
 int slimport_read_edid_break(uint8_t *edid_break);
 extern 	void *slimport_edid_p;

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -17,14 +30,14 @@
 
 #ifndef __CCCI_COMMON_H__
 #define __CCCI_COMMON_H__
-#include <ccci_cfg.h>
-#include <ccci_err_no.h>
-#include <ccci_md.h>
-#include <ccci_layer.h>
-#include <ccci_rpc.h>
-#include <ccci_ipc.h>
-#include <ccci_fs.h>
-#include <ccmni_net.h>
+#include "ccci_cfg.h"
+#include "ccci_err_no.h"
+#include "ccci_md.h"
+#include "ccci_layer.h"
+#include "ccci_rpc.h"
+#include "ccci_ipc.h"
+#include "ccci_fs.h"
+#include "ccmni_net.h"
 #include <ccci_platform_cfg.h>
 #include <mach/mtk_ccci_helper.h>
 /* ======================================================== */
@@ -315,9 +328,6 @@ int set_sim_type(int md_id, int data);
 int get_sim_type(int md_id, int *p_sim_type);
 int enable_get_sim_type(int md_id, unsigned int enable);
 void ccci_dump_md_register(int md_id);
-#ifdef CONFIG_MTK_MD_SBP_CUSTOM_VALUE
-int ccci_set_md_sbp(int md_id, unsigned int md_sbp);
-#endif	/*  CONFIG_MTK_MD_SBP_CUSTOM_VALUE */
 /* Generally, AP and MD has same share memory address after hw remapp.
  * however, if hardware remapp does not work, then need software remap,
  *This variable is used to fix md phy addr does not equeal with AP.

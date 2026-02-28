@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _CUST_BATTERY_METER_H
 #define _CUST_BATTERY_METER_H
 
@@ -28,9 +41,9 @@
 
 #define FG_METER_RESISTANCE	0
 
+//CEI comment start//
+#if 0 //MTK ORG
 /* Qmax for battery  */
-//CEI comments start//
-#if 0
 #define Q_MAX_POS_50	2743
 #define Q_MAX_POS_25 2709
 #define Q_MAX_POS_0 1168
@@ -40,6 +53,17 @@
 #define Q_MAX_POS_25_H_CURRENT 2655
 #define Q_MAX_POS_0_H_CURRENT 1145
 #define Q_MAX_NEG_10_H_CURRENT 747
+
+/* Qmax for battery low CV*/
+#define Q_MAX_POS_50_LCV	2700
+#define Q_MAX_POS_25_LCV	2600
+#define Q_MAX_POS_0_LCV		1300
+#define Q_MAX_NEG_10_LCV	700
+
+#define Q_MAX_POS_50_H_CURRENT_LCV	2600
+#define Q_MAX_POS_25_H_CURRENT_LCV	2500
+#define Q_MAX_POS_0_H_CURRENT_LCV	1200
+#define Q_MAX_NEG_10_H_CURRENT_LCV	600
 #else
 //CEI comments end//
 #define Q_MAX_POS_50	2261
@@ -51,12 +75,18 @@
 #define Q_MAX_POS_25_H_CURRENT	2260
 #define Q_MAX_POS_0_H_CURRENT	2152
 #define Q_MAX_NEG_10_H_CURRENT	1809
-//CEI comments end//
-#endif
 
-//CEI comments start//
-#define MTK_MULTI_BAT_PROFILE_SUPPORT
-#define MTK_GET_BATTERY_ID_BY_AUXADC
+/* Qmax for battery low CV*/
+#define Q_MAX_POS_50_LCV	2700
+#define Q_MAX_POS_25_LCV	2600
+#define Q_MAX_POS_0_LCV		1300
+#define Q_MAX_NEG_10_LCV	700
+
+#define Q_MAX_POS_50_H_CURRENT_LCV	2600
+#define Q_MAX_POS_25_H_CURRENT_LCV	2500
+#define Q_MAX_POS_0_H_CURRENT_LCV	1200
+#define Q_MAX_NEG_10_H_CURRENT_LCV	600
+#endif
 //CEI comments end//
 
 /* Discharge Percentage */
@@ -66,7 +96,7 @@
 /* battery meter parameter */
 #define CHANGE_TRACKING_POINT
 #ifdef CONFIG_MTK_HAFG_20
-#define CUST_TRACKING_POINT	0
+#define CUST_TRACKING_POINT	15
 #else
 #define CUST_TRACKING_POINT	1
 #endif
@@ -78,11 +108,15 @@
 #define OCV_BOARD_COMPESATE	0 /*mV */
 #define R_FG_BOARD_BASE	1000
 #define R_FG_BOARD_SLOPE	1000 /*slope*/
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	#define CAR_TUNE_VALUE	101 /*1.00 */
+#else
 //CEI comment start// //Check//
 //CAR_TUNE_VAL tuning
-#define CAR_TUNE_VALUE	117 /*1.00 */
-extern int get_car_tune_value(void);
+	#define CAR_TUNE_VALUE	117 /*1.00 */ //MTK ORG = 118
 //CEI comment end//
+#endif
+
 
 /* HW Fuel gague  */
 #define CURRENT_DETECT_R_FG	10  /*1mA*/
@@ -91,29 +125,31 @@ extern int get_car_tune_value(void);
 #define R_FG_VALUE	10 /* mOhm, base is 20*/
 
 /* fg 2.0 */
-#define DIFFERENCE_HWOCV_RTC	30
+#define DIFFERENCE_HWOCV_RTC		30
 //CEI comment start//
-#if 0
-#define DIFFERENCE_HWOCV_SWOCV	10
-#define DIFFERENCE_SWOCV_RTC	30
-#else
-#define DIFFERENCE_HWOCV_SWOCV	25
-#define DIFFERENCE_SWOCV_RTC	30
-#endif
+#define DIFFERENCE_HWOCV_SWOCV		25 //MTK ORG=10
+#define DIFFERENCE_SWOCV_RTC		30 //MTK ORG=10
 //CEI comment end//
+#define DIFFERENCE_HWOCV_VBAT		30
+#define DIFFERENCE_VBAT_RTC			30
+#define DIFFERENCE_SWOCV_RTC_POS	15
 #define MAX_SWOCV	3
 
 #define DIFFERENCE_VOLTAGE_UPDATE	20
 #define AGING1_LOAD_SOC	70
 #define AGING1_UPDATE_SOC	30
 //CEI comment start//
-#define BATTERYPSEUDO100	99
+#define BATTERYPSEUDO100	99 //MTK ORG=95
 //CEI comment end//
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
 #define BATTERYPSEUDO1 2
-
+#else
 //CEI comment start//
-#define Q_MAX_BY_SYS			/*8. Qmax variant by system drop voltage.*/
+#define BATTERYPSEUDO1 2 //MTK ORG=6
 //CEI comment end//
+#endif
+
+/* #define Q_MAX_BY_SYS */			/*8. Qmax variant by system drop voltage.*/
 #define Q_MAX_SYS_VOLTAGE		3350
 #define SHUTDOWN_GAUGE0
 #define SHUTDOWN_GAUGE1_XMINS
@@ -127,7 +163,6 @@ extern int get_car_tune_value(void);
 /* SW Fuel Gauge */
 #define MAX_HWOCV	5
 #define MAX_VBAT	90
-#define DIFFERENCE_HWOCV_VBAT	30
 
 /* fg 1.0 */
 #define CUST_POWERON_DELTA_CAPACITY_TOLRANCE	40
@@ -161,10 +196,31 @@ extern int get_car_tune_value(void);
 #define MD_SLEEP_CURRENT_CHECK
 
 /*7. Qmax variant by current loading.*/
-/*#define Q_MAX_BY_CURRENT*/
+/* #define Q_MAX_BY_CURRENT */
 
 #define FG_BAT_INT
 #define IS_BATTERY_REMOVE_BY_PMIC
+/* #define USE_EMBEDDED_BATTERY */
 
+/* Calculate do in Kernel */
+/* #define FORCE_D0_IN_KERNEL */
 
+/* Use UI_SOC3 to smooth UI_SOC2 */
+/* #define USING_SMOOTH_UI_SOC2 */
+
+/* SOC track to SWOCV */
+#define CUST_TRACKING_GAP		15	/* start tracking gap */
+#define CUST_TRACKINGOFFSET		0	/* Force offset to shift SOC to 0 */
+#define CUST_TRACKINGEN			0	/* 0:disable, 1:enable */
+
+/* Multi battery */
+//CEI comment start//
+#define MTK_MULTI_BAT_PROFILE_SUPPORT //Enable for multiple battery
+//CEI comment end//
+
+/* #define CUSTOM_SOFT_CHARGE_30 */
+/* #define CUSTOM_INVALID_SOFT_CHARGER_DETECT */
+
+#define TRK_POINT_EN 1
+#define TRK_POINT_THR 5
 #endif

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -1027,11 +1040,10 @@ static void sensor_init(void)
 	otp_update();
 	#endif
 #endif
-
+	spin_lock(&imgsensor_drv_lock);
     imgsensor.update_sensor_otp_awb = 0; // Init to 0
     imgsensor.update_sensor_otp_lsc = 0; // Init to 0
-
-
+	spin_unlock(&imgsensor_drv_lock);
 }   /*  sensor_init  */
 
 
@@ -2701,6 +2713,8 @@ static kal_uint32 get_info(MSDK_SCENARIO_ID_ENUM scenario_id,
     sensor_info->SensorPacketECCOrder = 1;
 
     sensor_info->PerFrameCTL_Support = 1;
+	sensor_info->SensorHorFOV = 62;
+	sensor_info->SensorVerFOV = 49;
 
     switch (scenario_id) {
         case MSDK_SCENARIO_ID_CAMERA_PREVIEW:

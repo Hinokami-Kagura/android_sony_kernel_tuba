@@ -11,41 +11,17 @@
  *
  */
 
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
-
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
 #include "gamerotvechub.h"
 #include <grv.h>
-#include <linux/hwmsen_helper.h>
-
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include <linux/batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
 
-
 #define GROTVEC_TAG                  "[gamerotvechub] "
-#define GROTVEC_FUN(f)               printk(GROTVEC_TAG"%s\n", __func__)
-#define GROTVEC_ERR(fmt, args...)    printk(GROTVEC_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
-#define GROTVEC_LOG(fmt, args...)    printk(GROTVEC_TAG fmt, ##args)
+#define GROTVEC_FUN(f)               pr_debug(GROTVEC_TAG"%s\n", __func__)
+#define GROTVEC_ERR(fmt, args...)    pr_err(GROTVEC_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
+#define GROTVEC_LOG(fmt, args...)    pr_debug(GROTVEC_TAG fmt, ##args)
 
 typedef enum {
 	GROTVECHUB_TRC_INFO = 0X10,
@@ -141,7 +117,8 @@ static int gamerotvec_get_data(int *x, int *y, int *z, int *scalar, int *status)
 	*x				= data.orientation_t.azimuth;
 	*y				= data.orientation_t.pitch;
 	*z				= data.orientation_t.roll;
-	*status		= data.orientation_t.status;
+	*scalar				= data.orientation_t.scalar;
+	*status			= data.orientation_t.status;
 	GROTVEC_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d!\n",
 		time_stamp, time_stamp_gpt, *x, *y, *z);
 	return 0;
@@ -175,8 +152,8 @@ static int gamerotvechub_local_init(void)
 	ctl.open_report_data = gamerotvec_open_report_data;
 	ctl.enable_nodata = gamerotvec_enable_nodata;
 	ctl.set_delay = gamerotvec_set_delay;
-	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_report_input_direct = true;
+	ctl.is_support_batch = false;
 	err = grv_register_control_path(&ctl);
 	if (err) {
 		GROTVEC_ERR("register gamerotvec control path err\n");
@@ -184,9 +161,15 @@ static int gamerotvechub_local_init(void)
 	}
 
 	data.get_data = gamerotvec_get_data;
+	data.vender_div = 1000000;
 	err = grv_register_data_path(&data);
 	if (err) {
 		GROTVEC_ERR("register gamerotvec data path err\n");
+		goto exit;
+	}
+	err = batch_register_support_info(ID_GAME_ROTATION_VECTOR, ctl.is_support_batch, data.vender_div, 1);
+	if (err) {
+		GROTVEC_ERR("register magnetic batch support err = %d\n", err);
 		goto exit;
 	}
 	return 0;

@@ -296,7 +296,6 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		goto Devices_early_resume;
 
 	error = dpm_suspend_noirq(PMSG_SUSPEND);
-        log_suspend_end(PMSG_SUSPEND);
 	if (error) {
 		last_dev = suspend_stats.last_failed_dev + REC_FAILED_NUM - 1;
 		last_dev %= REC_FAILED_NUM;
@@ -333,7 +332,9 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 
 	arch_suspend_disable_irqs();
 	BUG_ON(!irqs_disabled());
-
+#ifdef CONFIG_PM_WAKEUP_TIMES
+	dpm_log_wakeup_stats(PMSG_SUSPEND);
+#endif
 	error = syscore_suspend();
 	if (!error) {
 		*wakeup = pm_wakeup_pending();
@@ -353,6 +354,9 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		syscore_resume();
 	}
 
+#ifdef CONFIG_PM_WAKEUP_TIMES
+	dpm_log_start_time(PMSG_RESUME);
+#endif
 	arch_suspend_enable_irqs();
 	BUG_ON(irqs_disabled());
 
@@ -360,7 +364,6 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	enable_nonboot_cpus();
 
  Platform_wake:
-        log_resume_start(PMSG_RESUME);
 	platform_resume_noirq(state);
 	dpm_resume_noirq(PMSG_RESUME);
 
@@ -393,7 +396,9 @@ int suspend_devices_and_enter(suspend_state_t state)
 
 	suspend_console();
 	suspend_test_start();
-	log_suspend_start(PMSG_SUSPEND);
+#ifdef CONFIG_PM_WAKEUP_TIMES
+	dpm_log_start_time(PMSG_SUSPEND);
+#endif
 	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
 		pr_err("PM: Some devices failed to suspend, or early wake event detected\n");
@@ -411,7 +416,9 @@ int suspend_devices_and_enter(suspend_state_t state)
  Resume_devices:
 	suspend_test_start();
 	dpm_resume_end(PMSG_RESUME);
-        log_resume_end(PMSG_RESUME);
+#ifdef CONFIG_PM_WAKEUP_TIMES
+	dpm_log_wakeup_stats(PMSG_RESUME);
+#endif
 	suspend_test_finish("resume devices");
 	trace_suspend_resume(TPS("resume_console"), state, true);
 	resume_console();

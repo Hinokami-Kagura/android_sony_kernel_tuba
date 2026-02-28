@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/of.h>
 #include <linux/of_address.h>
 
@@ -38,7 +51,11 @@ void __iomem  *apmixed_base_in_idle;
 /* Idle handler on/off */
 int idle_switch[NR_TYPES] = {
 	1,	/* dpidle switch */
+#ifdef CONFIG_MTK_PMIC_CHIP_MT6353
+	1,	/* soidle3 switch */
+#else
 	0,	/* soidle3 switch */
+#endif
 	1,	/* soidle switch */
 #ifdef CONFIG_CPU_ISOLATION
 	1,	/* mcidle switch */
@@ -128,6 +145,7 @@ const char *reason_name[NR_REASONS] = {
 	"by_iso",
 #endif
 	"by_dvfsp",
+	"by_conn",
 };
 
 static char cg_group_name[NR_GRPS][10] = {
@@ -394,10 +412,12 @@ bool is_disp_pwm_rosc(void)
 
 bool is_auxadc_released(void)
 {
+#if 0
 	if ((~idle_readl(INFRA_SW_CG_0_STA) & 0x400) == 0x400) {
 		idle_err("AUXADC CG does not be released\n");
 		return false;
 	}
+#endif
 
 	return true;
 }

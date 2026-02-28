@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -39,7 +52,7 @@
 #define CFG_ENV_SIZE    0x1000
 #define CFG_ENV_OFFSET  0x40000
 
-#define NR_OPPS         8
+#define NR_OPPS         1
 
 
 #undef TAG
@@ -76,11 +89,14 @@ struct picachu_info {
 	int enable;
 };
 
+static struct picachu_info *picachu_data;
+static unsigned int picachu_debug;
 
-struct picachu_info *picachu_data = NULL;
-unsigned int picachu_debug = 0;
-int picachu_enable = 0;
-
+#if defined(CONFIG_MTK_DISABLE_PICACHU)
+static int picachu_enable;
+#else
+static int picachu_enable = 1;
+#endif
 
 static void dump_picachu_info(struct seq_file *m, struct picachu_info *info)
 {

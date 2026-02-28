@@ -1,8 +1,19 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 //s_add new sensor driver here
 //export funtions
 /*IMX*/
-UINT32 IMX258_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
-UINT32 IMX258_LGIT_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 UINT32 IMX220_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 UINT32 IMX219_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 UINT32 IMX219_TRULY_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
@@ -13,7 +24,8 @@ UINT32 IMX132_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 UINT32 IMX135_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 UINT32 IMX105_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 UINT32 IMX073_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
-
+UINT32 IMX258_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
+UINT32 IMX258_LGIT_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 /*OV*/
 UINT32 OV16825MIPISensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
 UINT32 OV13850_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc);
@@ -140,6 +152,7 @@ ACDK_KD_SENSOR_INIT_FUNCTION_STRUCT kdSensorList[MAX_NUM_OF_SUPPORT_SENSOR+1] =
 #if defined(IMX219_TRULY_MIPI_RAW)
     {IMX219_TRULY_SENSOR_ID, SENSOR_DRVNAME_IMX219_TRULY_MIPI_RAW, IMX219_TRULY_MIPI_RAW_SensorInit},
 #endif
+
 /*  ADD sensor driver before this line */
     {0,{0},NULL}, //end of list
 };

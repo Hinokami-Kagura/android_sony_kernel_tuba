@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /***************************************************************************
  * Filename:
  * ---------
@@ -131,9 +144,9 @@ struct pinctrl_state *st_irq_init = NULL;
 
 /* For DMA */
 static char *I2CDMAWriteBuf;	/*= NULL;*//* unnecessary initialise */
-static unsigned int I2CDMAWriteBuf_pa;	/* = NULL; */
+static dma_addr_t I2CDMAWriteBuf_pa;
 static char *I2CDMAReadBuf;	/*= NULL;*//* unnecessary initialise */
-static unsigned int I2CDMAReadBuf_pa;	/* = NULL; */
+static dma_addr_t I2CDMAReadBuf_pa;	/* = NULL; */
 
 static int fgNfcChip;		/*= 0;*//* unnecessary initialise */
 int forceExitBlockingRead = 0;
@@ -372,13 +385,11 @@ static int mt6605_probe(struct i2c_client *client,
 #ifdef CONFIG_64BIT
 	I2CDMAWriteBuf =
 	    (char *)dma_alloc_coherent(&client->dev, MAX_BUFFER_SIZE,
-				       (dma_addr_t *) &I2CDMAWriteBuf_pa,
-				       GFP_KERNEL);
+				       &I2CDMAWriteBuf_pa, GFP_KERNEL);
 #else
 	I2CDMAWriteBuf =
 	    (char *)dma_alloc_coherent(NULL, MAX_BUFFER_SIZE,
-				       (dma_addr_t *) &I2CDMAWriteBuf_pa,
-				       GFP_KERNEL);
+				       &I2CDMAWriteBuf_pa, GFP_KERNEL);
 #endif
 
 	if (I2CDMAWriteBuf == NULL) {
@@ -388,21 +399,17 @@ static int mt6605_probe(struct i2c_client *client,
 #ifdef CONFIG_64BIT
 	I2CDMAReadBuf =
 	    (char *)dma_alloc_coherent(&client->dev, MAX_BUFFER_SIZE,
-				       (dma_addr_t *) &I2CDMAReadBuf_pa,
-				       GFP_KERNEL);
+				       &I2CDMAReadBuf_pa, GFP_KERNEL);
 #else
 	I2CDMAReadBuf =
 	    (char *)dma_alloc_coherent(NULL, MAX_BUFFER_SIZE,
-				       (dma_addr_t *) &I2CDMAReadBuf_pa,
-				       GFP_KERNEL);
+				       &I2CDMAReadBuf_pa, GFP_KERNEL);
 #endif
 
 	if (I2CDMAReadBuf == NULL) {
 		pr_err("%s : failed to allocate dma buffer\n", __func__);
 		goto err_request_irq_failed;
 	}
-	pr_debug("%s :I2CDMAWriteBuf_pa %d, I2CDMAReadBuf_pa,%d\n", __func__,
-		 I2CDMAWriteBuf_pa, I2CDMAReadBuf_pa);
 	/* request irq.  the irq is set whenever the chip has data available
 	 * for reading.  it is cleared when all data has been read.
 	 */
@@ -439,6 +446,7 @@ static int mt6605_probe(struct i2c_client *client,
 				 nfc_irq);
 			nfc_irq_count++;
 			mt6605_disable_irq(nfc_irq);
+			enable_irq_wake(nfc_irq);
 		}
 
 	} else {
@@ -647,7 +655,12 @@ static ssize_t mt6605_dev_read(struct file *filp, char __user *buf,
 		 ret, mt_nfc_get_gpio_value(mt6605_dev->irq_gpio));*/
 
 	if (ret < 0) {
-		pr_debug("%s: i2c_master_recv returned %d\n", __func__, ret);
+		pr_debug("%s: i2c_master_recv returned %d, irq status=%d\n", __func__,
+			 ret, mt_nfc_get_gpio_value(mt6605_dev->irq_gpio));
+		pr_debug("%s, enable clock buffer\n", __func__);
+		clk_buf_ctrl(CLK_BUF_NFC, 0);
+		usleep_range(900, 1000);
+		clk_buf_ctrl(CLK_BUF_NFC, 1);
 		return ret;
 	}
 
@@ -708,16 +721,16 @@ static ssize_t mt6605_dev_write(struct file *filp, const char __user *buf,
 		/* mt6605_dev->client->ext_flag |= I2C_A_FILTER_MSG; */
 		mt6605_dev->client->timing = NFC_CLIENT_TIMING;
 
-		ret_tmp =
-		    i2c_master_send(mt6605_dev->client,
-				    (unsigned char *)(uintptr_t)
-				    I2CDMAWriteBuf_pa, count);
+			ret_tmp =
+			    i2c_master_send(mt6605_dev->client,
+					    (unsigned char *)(uintptr_t)
+					    I2CDMAWriteBuf_pa, count);
 
-		if (ret_tmp != count) {
-			pr_debug("%s : i2c_master_send returned %d\n", __func__,
-				 ret);
-			ret = -EIO;
-			return ret;
+			if (ret_tmp != count) {
+				pr_debug("%s : i2c_master_send returned %d\n", __func__,
+					 ret);
+				ret = -EIO;
+				return ret;
 		}
 
 		ret += ret_tmp;
@@ -766,7 +779,7 @@ static long mt6605_dev_unlocked_ioctl(struct file *filp, unsigned int cmd,
 
 	struct mt6605_dev *mt6605_dev = filp->private_data;
 	int result = 0;
-	int gpio_dir, gpio_num, tmp_gpio;
+	int gpio_dir, gpio_num = -1, tmp_gpio;
 /*
 	pr_debug("mt6605_dev_unlocked_ioctl: cmd=0x%04x,arg=0x%04lx.\n", cmd,
 		 arg);
@@ -824,6 +837,7 @@ static long mt6605_dev_unlocked_ioctl(struct file *filp, unsigned int cmd,
 				     __func__, nfc_irq);
 				nfc_irq_count++;
 				mt6605_disable_irq(nfc_irq);
+				enable_irq_wake(nfc_irq);
 			}
 		} else {
 			pr_err("%s : can not find NFC eint compatible node.\n",
@@ -909,6 +923,9 @@ static long mt6605_dev_unlocked_ioctl(struct file *filp, unsigned int cmd,
 		return result;
 	}
 
+	if (-1 == gpio_num)
+		return 0;
+
 	/* if (result != MTK_NFC_PULL_INVALID) { */
 	if (cmd == MTK_NFC_IOCTL_READ) {
 		result = mt_nfc_get_gpio_value(gpio_num);
@@ -920,7 +937,8 @@ static long mt6605_dev_unlocked_ioctl(struct file *filp, unsigned int cmd,
 		   result = MTK_NFC_PULL_INVALID;
 		   } */
 
-		pr_debug("%s : get gpio value. %d\n", __func__, result);
+		if (0 == result)
+			pr_debug("%s : get gpio value: %d, gpio_num: %d\n", __func__, result, gpio_num);
 
 		/*error handler for eint_registration abnormal case */
 		if (tmp_gpio == MTK_NFC_GPIO_IRQ && result == 0x01) {

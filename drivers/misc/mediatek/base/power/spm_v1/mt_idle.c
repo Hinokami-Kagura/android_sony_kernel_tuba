@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -23,7 +36,7 @@
 #include "mt_ptp.h"
 #include <mach/mt_gpt.h>
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 #include <mach/mt_cpuxgpt.h>
 #else
 #include <mach/mt_clkmgr.h>
@@ -63,7 +76,7 @@ enum mt_idle_mode {
 	MT_SLIDLE,
 };
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 enum {
 	CG_INFRA   = 0,
 	CG_PERI    = 1,
@@ -294,7 +307,11 @@ enum {
 /* Idle handler on/off */
 static int idle_switch[NR_TYPES] = {
 	1,  /* dpidle switch */
+#if defined(CONFIG_MTK_DISABLE_SODI)
+	0,  /* soidle switch */
+#else
 	1,  /* soidle switch */
+#endif
 	1,  /* slidle switch */
 	1,  /* rgidle switch */
 };
@@ -341,7 +358,11 @@ static unsigned int slidle_condition_mask[NR_GRPS] = {
 /* Idle handler on/off */
 static int idle_switch[NR_TYPES] = {
 	1,  /* dpidle switch */
+#if defined(CONFIG_MTK_DISABLE_SODI)
+	0,  /* soidle switch */
+#else
 	1,  /* soidle switch */
+#endif
 	1,  /* slidle switch */
 	1,  /* rgidle switch */
 };
@@ -387,7 +408,11 @@ static unsigned int slidle_condition_mask[NR_GRPS] = {
 #elif defined(CONFIG_ARCH_MT6753)
 static int idle_switch[NR_TYPES] = {
 	1,  /* dpidle switch */
+#if defined(CONFIG_MTK_DISABLE_SODI)
+	0,  /* soidle switch */
+#else
 	1,  /* soidle switch */
+#endif
 	1,  /* slidle switch */
 	1,  /* rgidle switch */
 };
@@ -430,7 +455,7 @@ static unsigned int slidle_condition_mask[NR_GRPS] = {
 	0x00000000, /* VDEC1: */
 	0x00000000, /* VENC: */
 };
-#elif defined(CONFIG_ARCH_MT6580)
+#elif defined(CONFIG_ARCH_MT6570) || defined(CONFIG_ARCH_MT6580)
 /*Idle handler on/off*/
 static int idle_switch[NR_TYPES] = {
 	1,  /* dpidle switch */
@@ -500,7 +525,7 @@ static const char *reason_name[NR_REASONS] = {
 };
 
 char cg_group_name[][NR_GRPS] = {
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	"INFRA",
 	"PERI",
 	"DISP0",
@@ -583,7 +608,7 @@ static unsigned int		idle_spm_lock;
 #define clk_readl(addr)			__raw_readl(addr)
 #define clk_writel(addr, val)	mt_reg_sync_writel(val, addr)
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 static void __iomem *infrasys_base;
 static void __iomem *perisys_base;
 static void __iomem *audiosys_base;
@@ -626,6 +651,8 @@ static void __iomem *cksys_base;
 #define ISP_PWR_STA_MASK        BIT(5)
 #define VDE_PWR_STA_MASK        BIT(7)
 #define VEN_PWR_STA_MASK        BIT(8)
+
+#define INFRA_AUDIO_PDN_STA_MASK	BIT(5)
 
 enum subsys_id {
 	SYS_VDE,
@@ -679,7 +706,8 @@ static void get_all_clock_state(u32 clks[NR_GRPS])
 	if (sys_is_on(SYS_MFG))
 		clks[CG_MFG] = ~idle_readl(MFG_CG_CON); /* MFG */
 
-	clks[CG_AUDIO] = ~idle_readl(AUDIO_TOP_CON0); /* AUDIO */
+	if (clks[CG_INFRA] & INFRA_AUDIO_PDN_STA_MASK) /* check if infra_audio is on */
+		clks[CG_AUDIO] = ~idle_readl(AUDIO_TOP_CON0); /* AUDIO */
 
 	if (sys_is_on(SYS_VDE)) {
 		clks[CG_VDEC0] = idle_readl(VDEC_CKEN_SET); /* VDEC0 */
@@ -763,7 +791,7 @@ static int __init get_base_from_node(
 	node = of_find_matching_node(NULL, ids);
 	if (!node) {
 		idle_warn("node '%s' not found!\n", cmp);
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 		BUG();
 #endif
 	}
@@ -771,7 +799,7 @@ static int __init get_base_from_node(
 	*pbase = of_iomap(node, idx);
 	if (!(*pbase)) {
 		idle_warn("node '%s' cannot iomap!\n", cmp);
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 		BUG();
 #endif
 	}
@@ -904,7 +932,7 @@ void idle_unlock_spm(enum idle_lock_spm_id id)
  * SODI part
  */
 static DEFINE_MUTEX(soidle_locked);
-
+#if !defined(CONFIG_ARCH_MT6580)
 static void enable_soidle_by_mask(int grp, unsigned int mask)
 {
 	mutex_lock(&soidle_locked);
@@ -918,26 +946,57 @@ static void disable_soidle_by_mask(int grp, unsigned int mask)
 	soidle_condition_mask[grp] |= mask;
 	mutex_unlock(&soidle_locked);
 }
-
+#endif
 void enable_soidle_by_bit(int id)
 {
+#if !defined(CONFIG_ARCH_MT6580)
 	int grp = id / 32;
 	unsigned int mask = 1U << (id % 32);
 
 	BUG_ON(INVALID_GRP_ID(grp));
 	enable_soidle_by_mask(grp, mask);
+#else
+	unsigned int grp = clk_id_to_grp_id(id);
+	unsigned int mask = clk_id_to_mask(id);
+
+	if ((grp == NR_GRPS) || (mask == NR_GRPS))
+		idle_warn("[%s]wrong clock id\n", __func__);
+	else
+		soidle_condition_mask[grp] &= ~mask;
+#endif
 }
 EXPORT_SYMBOL(enable_soidle_by_bit);
 
 void disable_soidle_by_bit(int id)
 {
+#if !defined(CONFIG_ARCH_MT6580)
 	int grp = id / 32;
 	unsigned int mask = 1U << (id % 32);
 
 	BUG_ON(INVALID_GRP_ID(grp));
 	disable_soidle_by_mask(grp, mask);
+#else
+	unsigned int grp = clk_id_to_grp_id(id);
+	unsigned int mask = clk_id_to_mask(id);
+
+	if ((grp == NR_GRPS) || (mask == NR_GRPS))
+		idle_warn("[%s]wrong clock id\n", __func__);
+	else
+		soidle_condition_mask[grp] |= mask;
+#endif
 }
 EXPORT_SYMBOL(disable_soidle_by_bit);
+
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
+void defeature_soidle_by_display(void)
+{
+    if (idle_switch[IDLE_TYPE_SO] != 0)
+    {
+        idle_switch[IDLE_TYPE_SO] = 0;
+    }
+}
+EXPORT_SYMBOL(defeature_soidle_by_display);
+#endif
 
 static bool soidle_can_enter(int cpu)
 {
@@ -958,6 +1017,13 @@ static bool soidle_can_enter(int cpu)
 		goto out;
 	}
 
+#if defined(CONFIG_MICROTRUST_TEE_SUPPORT)
+	if (!is_teei_ready()) {
+		reason = BY_OTH;
+		goto out;
+	}
+#endif
+
 	/* decide when to enable SODI by display driver */
 	if (spm_get_sodi_en() == 0) {
 		reason = BY_OTH;
@@ -966,7 +1032,7 @@ static bool soidle_can_enter(int cpu)
 
 	if (soidle_by_pass_cg == 0) {
 		memset(soidle_block_mask, 0, NR_GRPS * sizeof(unsigned int));
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 		if (!cg_check_idle_can_enter(soidle_condition_mask, soidle_block_mask, MT_SOIDLE)) {
 #else
 	if (!clkmgr_idle_can_enter(soidle_condition_mask, soidle_block_mask)) {
@@ -1085,7 +1151,7 @@ void soidle_after_wfi(int cpu)
  * deep idle part
  */
 static DEFINE_MUTEX(dpidle_locked);
-
+#if !defined(CONFIG_ARCH_MT6580)
 static void enable_dpidle_by_mask(int grp, unsigned int mask)
 {
 	mutex_lock(&dpidle_locked);
@@ -1099,24 +1165,44 @@ static void disable_dpidle_by_mask(int grp, unsigned int mask)
 	dpidle_condition_mask[grp] |= mask;
 	mutex_unlock(&dpidle_locked);
 }
-
+#endif
 void enable_dpidle_by_bit(int id)
 {
+#if !defined(CONFIG_ARCH_MT6580)
 	int grp = id / 32;
 	unsigned int mask = 1U << (id % 32);
 
 	BUG_ON(INVALID_GRP_ID(grp));
 	enable_dpidle_by_mask(grp, mask);
+#else
+	unsigned int grp = clk_id_to_grp_id(id);
+	unsigned int mask = clk_id_to_mask(id);
+
+	if ((grp == NR_GRPS) || (mask == NR_GRPS))
+		idle_warn("[%s]wrong clock id\n", __func__);
+	else
+		dpidle_condition_mask[grp] &= ~mask;
+#endif
 }
 EXPORT_SYMBOL(enable_dpidle_by_bit);
 
 void disable_dpidle_by_bit(int id)
 {
+#if !defined(CONFIG_ARCH_MT6580)
 	int grp = id / 32;
 	unsigned int mask = 1U << (id % 32);
 
 	BUG_ON(INVALID_GRP_ID(grp));
 	disable_dpidle_by_mask(grp, mask);
+#else
+	unsigned int grp = clk_id_to_grp_id(id);
+	unsigned int mask = clk_id_to_mask(id);
+
+	if ((grp == NR_GRPS) || (mask == NR_GRPS))
+		idle_warn("[%s]wrong clock id\n", __func__);
+	else
+		dpidle_condition_mask[grp] |= mask;
+#endif
 }
 EXPORT_SYMBOL(disable_dpidle_by_bit);
 
@@ -1140,9 +1226,16 @@ static bool dpidle_can_enter(void)
 		goto out;
 	}
 
+#if defined(CONFIG_MICROTRUST_TEE_SUPPORT)
+	if (!is_teei_ready()) {
+		reason = BY_OTH;
+		goto out;
+	}
+#endif
+
 	if (dpidle_by_pass_cg == 0) {
 		memset(dpidle_block_mask, 0, NR_GRPS * sizeof(unsigned int));
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 		if (!cg_check_idle_can_enter(dpidle_condition_mask, dpidle_block_mask, MT_DPIDLE)) {
 #else
 		if (!clkmgr_idle_can_enter(dpidle_condition_mask, dpidle_block_mask)) {
@@ -1216,7 +1309,7 @@ void spm_dpidle_before_wfi(void)
 {
 	bus_dcm_enable();
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	faudintbus_pll2sq();
 #else
 	clkmgr_faudintbus_pll2sq();
@@ -1261,7 +1354,7 @@ void spm_dpidle_after_wfi(void)
 	}
 #endif
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	faudintbus_sq2pll();
 #else
 	clkmgr_faudintbus_sq2pll();
@@ -1322,7 +1415,7 @@ static bool slidle_can_enter(void)
 	}
 
 	memset(slidle_block_mask, 0, NR_GRPS * sizeof(unsigned int));
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	if (!cg_check_idle_can_enter(slidle_condition_mask, slidle_block_mask, MT_SLIDLE)) {
 #else
 	if (!clkmgr_idle_can_enter(slidle_condition_mask, slidle_block_mask)) {
@@ -1804,7 +1897,7 @@ static ssize_t idle_state_write(struct file *filp,
 
 	cmd_buf[count] = '\0';
 
-	if (sscanf(cmd_buf, "%s %x", cmd, &param) == 2) {
+	if (sscanf(cmd_buf, "%31s %x", cmd, &param) == 2) {
 		if (!strcmp(cmd, "switch")) {
 			for (idx = 0; idx < NR_TYPES; idx++)
 				idle_switch[idx] = (param & (1U << idx)) ? 1 : 0;
@@ -1899,7 +1992,7 @@ static ssize_t dpidle_state_write(struct file *filp,
 
 	cmd_buf[count] = '\0';
 
-	if (sscanf(cmd_buf, "%s %d", cmd, &param) == 2) {
+	if (sscanf(cmd_buf, "%31s %d", cmd, &param) == 2) {
 		if (!strcmp(cmd, "dpidle"))
 			idle_switch[IDLE_TYPE_DP] = param;
 		else if (!strcmp(cmd, "enable"))
@@ -2000,7 +2093,7 @@ static ssize_t soidle_state_write(struct file *filp,
 
 	cmd_buf[count] = '\0';
 
-	if (sscanf(cmd_buf, "%s %d", cmd, &param) == 2) {
+	if (sscanf(cmd_buf, "%31s %d", cmd, &param) == 2) {
 		if (!strcmp(cmd, "soidle"))
 			idle_switch[IDLE_TYPE_SO] = param;
 		else if (!strcmp(cmd, "enable"))
@@ -2088,7 +2181,7 @@ static ssize_t slidle_state_write(struct file *filp, const char __user *userbuf,
 
 	cmd_buf[count] = '\0';
 
-	if (sscanf(userbuf, "%s %d", cmd, &param) == 2) {
+	if (sscanf(userbuf, "%31s %d", cmd, &param) == 2) {
 		if (!strcmp(cmd, "slidle"))
 			idle_switch[IDLE_TYPE_SL] = param;
 		else if (!strcmp(cmd, "enable"))
@@ -2136,7 +2229,7 @@ static int mt_cpuidle_debugfs_init(void)
 void mt_cpuidle_framework_init(void)
 {
 	int err = 0;
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	int i = 0;
 #endif
 
@@ -2149,7 +2242,7 @@ void mt_cpuidle_framework_init(void)
 
 	err = 0;
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	for (i = 0; i < num_possible_cpus(); i++)
 		err |= cpu_xgpt_register_timer(i, NULL);
 #else
@@ -2159,7 +2252,7 @@ void mt_cpuidle_framework_init(void)
 	if (err)
 		idle_warn("[%s]fail to request cpuxgpt\n", __func__);
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	iomap_init();
 #endif
 

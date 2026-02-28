@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifdef pr_fmt
 #undef pr_fmt
 #endif
@@ -11,6 +24,7 @@
 #include <core/core.h>
 #include "dbg.h"
 #include "autok.h"
+#include "autok_dvfs.h"
 
 /* FIX ME: better low freq trigger condition is continual 2 or more times crc or tmo error */
 #define CMD_TUNE_SMPL_MAX_TIME          (4)
@@ -28,7 +42,6 @@
 #define MSDC_MAX_W_TIMEOUT_TUNE         (5)
 #define MSDC_MAX_W_TIMEOUT_TUNE_EMMC    (64)
 #define MSDC_MAX_R_TIMEOUT_TUNE         (3)
-#define MSDC_MAX_POWER_CYCLE            (5)
 
 #define MSDC_MAX_CONTINUOUS_FAIL_REQUEST_COUNT (50)
 
@@ -267,8 +280,9 @@ u32 msdc_power_tuning(struct msdc_host *host)
 		return 1;
 #endif
 
-	if (!host->error_tune_enable)
+	/* if (!host->error_tune_enable)
 		return 1;
+	*/
 
 	if ((host->sd_30_busy > 0)
 	 && (host->sd_30_busy <= MSDC_MAX_POWER_CYCLE)) {
@@ -504,6 +518,9 @@ void msdc_restore_timing_setting(struct msdc_host *host)
 			host->saved_para.ckgen_msdc_dly_sel);
 		MSDC_SET_FIELD(MSDC_INTEN, MSDC_INT_SDIOIRQ,
 			host->saved_para.inten_sdio_irq);
+
+		autok_init_sdr104(host);
+		autok_tuning_parameter_init(host, sdio_autok_res[AUTOK_VCORE_HIGH]);
 
 		host->mmc->pm_flags |= MMC_PM_KEEP_POWER;
 		host->mmc->rescan_entered = 0;

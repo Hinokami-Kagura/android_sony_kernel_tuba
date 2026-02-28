@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef __LA_H__
 #define __LA_H__
 
@@ -10,9 +23,20 @@
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/hwmsensor.h>
-#include <linux/earlysuspend.h>
-#include <linux/hwmsen_dev.h>
+
+#include <linux/i2c.h>
+#include <linux/irq.h>
+#include <linux/uaccess.h>
+#include <linux/delay.h>
+#include <linux/kobject.h>
+#include <linux/atomic.h>
+#include <linux/ioctl.h>
+
+#include <batch.h>
+#include <sensors_io.h>
+#include <hwmsen_helper.h>
+#include <hwmsensor.h>
+
 
 #define DEBUG
 #ifdef DEBUG
@@ -36,10 +60,12 @@
 
 #define LA_INVALID_VALUE -1
 
-#define EVENT_TYPE_LA_X						ABS_RX
-#define EVENT_TYPE_LA_Y				ABS_Y
-#define EVENT_TYPE_LA_Z				ABS_Z
-#define EVENT_TYPE_LA_STATUS			REL_X
+#define EVENT_TYPE_LA_X				REL_RX
+#define EVENT_TYPE_LA_Y				REL_RY
+#define EVENT_TYPE_LA_Z				REL_RZ
+#define EVENT_TYPE_LA_STATUS		REL_X
+#define EVENT_TYPE_LA_TIMESTAMP_HI	REL_HWHEEL
+#define EVENT_TYPE_LA_TIMESTAMP_LO	REL_DIAL
 
 #define LA_VALUE_MAX (32767)
 #define LA_VALUE_MIN (-32768)
@@ -77,7 +103,7 @@ struct la_init_info {
 };
 
 struct la_data {
-	hwm_sensor_data la_data;
+	struct hwm_sensor_data la_data;
 	int data_updata;
 };
 
@@ -98,7 +124,6 @@ struct la_context {
 	struct timer_list timer;	/* polling timer */
 	atomic_t trace;
 	atomic_t enable;
-	struct early_suspend early_drv;
 	struct la_data drv_data;
 	int cali_sw[LA_AXES_NUM + 1];
 	struct la_control_path la_ctl;
@@ -111,7 +136,7 @@ struct la_context {
 };
 
 extern int la_driver_add(struct la_init_info *obj);
-extern int la_data_report(int x, int y, int z, int status);
+extern int la_data_report(int x, int y, int z, int status, int64_t nt);
 extern int la_register_control_path(struct la_control_path *ctl);
 extern int la_register_data_path(struct la_data_path *data);
 #endif

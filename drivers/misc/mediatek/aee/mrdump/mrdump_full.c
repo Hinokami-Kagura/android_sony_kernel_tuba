@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
 #include <stdarg.h>
 #include <linux/delay.h>
 #include <linux/module.h>
@@ -7,7 +20,6 @@
 #include <linux/elf.h>
 #include <linux/elfcore.h>
 #include <linux/kallsyms.h>
-#include <linux/memblock.h>
 #include <linux/miscdevice.h>
 #include <mt-plat/mtk_ram_console.h>
 #include <linux/reboot.h>
@@ -17,6 +29,7 @@
 #include <linux/kexec.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
+#include <mach/wd_api.h>
 #if defined(CONFIG_FIQ_GLUE)
 #include <mt-plat/fiq_smp_call.h>
 #endif
@@ -38,7 +51,7 @@ static int crashing_cpu;
 
 static note_buf_t __percpu *crash_notes;
 
-bool mrdump_enable = 1;
+static bool mrdump_enable = 1;
 static int mrdump_output_device;
 static int mrdump_output_fstype;
 static unsigned long mrdump_output_lbaooo;
@@ -142,17 +155,15 @@ static void aee_kdump_cpu_stop(void *arg, void *regs, void *svc_sp)
 
 	elf_core_copy_kernel_regs((elf_gregset_t *)&crash_record->cpu_regs[cpu], ptregs);
 	crash_save_cpu((struct pt_regs *)regs, cpu);
-
-	set_cpu_online(cpu, false);
 	local_fiq_disable();
 	local_irq_disable();
 
-	__inner_flush_dcache_L1();
+	__disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2();
 	while (1)
 		cpu_relax();
 }
 
-static void __mrdump_reboot_stop_all(struct mrdump_crash_record *crash_record, int cpu)
+static void __mrdump_reboot_stop_all(struct mrdump_crash_record *crash_record)
 {
 	int timeout;
 
@@ -183,12 +194,12 @@ static void mrdump_stop_noncore_cpu(void *unused)
 	local_fiq_disable();
 	local_irq_disable();
 
-	__inner_flush_dcache_L1();
+	__disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2();
 	while (1)
 		cpu_relax();
 }
 
-static void __mrdump_reboot_stop_all(struct mrdump_crash_record *crash_record, int cpu)
+static void __mrdump_reboot_stop_all(struct mrdump_crash_record *crash_record)
 {
 	unsigned long msecs;
 	atomic_set(&waiting_for_crash_ipi, num_online_cpus() - 1);
@@ -220,7 +231,7 @@ static void __mrdump_reboot_va(AEE_REBOOT_MODE reboot_mode, struct pt_regs *regs
 	local_fiq_disable();
 
 #if defined(CONFIG_SMP)
-	__mrdump_reboot_stop_all(crash_record, cpu);
+	__mrdump_reboot_stop_all(crash_record);
 #endif
 
 	cpu = get_HW_cpuid();
@@ -235,14 +246,13 @@ static void __mrdump_reboot_va(AEE_REBOOT_MODE reboot_mode, struct pt_regs *regs
 
 	/* FIXME: Check reboot_mode is valid */
 	crash_record->reboot_mode = reboot_mode;
-	__inner_flush_dcache_all();
+	__disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2();
 
 	if (reboot_mode == AEE_REBOOT_MODE_NESTED_EXCEPTION) {
 		while (1)
 			cpu_relax();
 	}
 
-	mrdump_print_crash(regs);
 	mrdump_plat->reboot();
 }
 
@@ -262,27 +272,88 @@ void aee_kdump_reboot(AEE_REBOOT_MODE reboot_mode, const char *msg, ...)
 void __mrdump_create_oops_dump(AEE_REBOOT_MODE reboot_mode, struct pt_regs *regs, const char *msg, ...)
 {
 	va_list ap;
+	struct mrdump_crash_record *crash_record;
+	int cpu;
+
+	crash_record = &mrdump_cblock.crash_record;
+
+	local_irq_disable();
+	local_fiq_disable();
+
+#if defined(CONFIG_SMP)
+	__mrdump_reboot_stop_all(crash_record);
+#endif
+
+	cpu = get_HW_cpuid();
+	crashing_cpu = cpu;
+	crash_save_cpu(regs, cpu);
+
+	elf_core_copy_kernel_regs((elf_gregset_t *)&crash_record->cpu_regs[cpu], regs);
 
 	va_start(ap, msg);
-	__mrdump_reboot_va(reboot_mode, regs, msg, ap);
+	vsnprintf(crash_record->msg, sizeof(crash_record->msg), msg, ap);
 	va_end(ap);
+
+	crash_record->fault_cpu = cpu;
+	save_current_task();
+
+	/* FIXME: Check reboot_mode is valid */
+	crash_record->reboot_mode = reboot_mode;
 }
 
-static int mrdump_panic_create_dump(struct notifier_block *this, unsigned long event, void *ptr)
+int __init mrdump_platform_init(const struct mrdump_platform *plat)
 {
-	if (mrdump_enable) {
-		if (test_taint(TAINT_DIE))
-			aee_kdump_reboot(AEE_REBOOT_MODE_KERNEL_OOPS, "kernel Oops");
-		else
-			aee_kdump_reboot(AEE_REBOOT_MODE_KERNEL_PANIC, "kernel panic");
-	} else
-		pr_info("MT-RAMDUMP no enable");
-	return NOTIFY_DONE;
-}
+	struct mrdump_machdesc *machdesc_p;
 
-static struct notifier_block mrdump_panic_blk = {
-	.notifier_call	= mrdump_panic_create_dump,
-};
+	memset(&mrdump_cblock, 0, sizeof(struct mrdump_control_block));
+
+	mrdump_plat = plat;
+	if (mrdump_plat == NULL) {
+		mrdump_enable = 0;
+		pr_err("%s: MT-RAMDUMP platform no init\n", __func__);
+		return -EINVAL;
+	}
+
+	if (strcmp(mrdump_lk, MRDUMP_GO_DUMP) != 0) {
+		mrdump_enable = 0;
+		pr_err("%s: MT-RAMDUMP init failed, lk version %s not matched.\n", __func__, mrdump_lk);
+		return -EINVAL;
+	}
+
+	memcpy(&mrdump_cblock.sig, MRDUMP_GO_DUMP, 8);
+
+	/* move default enable MT-RAMDUMP to late_init (this function) */
+	if (mrdump_enable) {
+		mrdump_plat->hw_enable(mrdump_enable);
+		__inner_flush_dcache_all();
+	}
+
+	machdesc_p = &mrdump_cblock.machdesc;
+	machdesc_p->output_device = MRDUMP_DEV_EMMC;
+	machdesc_p->output_fstype = MRDUMP_FS_EXT4;
+	machdesc_p->nr_cpus = mrdump_enable ? NR_CPUS : 0;
+	machdesc_p->page_offset = (uint64_t)PAGE_OFFSET;
+	machdesc_p->high_memory = (uintptr_t)high_memory;
+
+	machdesc_p->vmalloc_start = (uint64_t)VMALLOC_START;
+	machdesc_p->vmalloc_end = (uint64_t)VMALLOC_END;
+
+	machdesc_p->modules_start = (uint64_t)MODULES_VADDR;
+	machdesc_p->modules_end = (uint64_t)MODULES_END;
+
+	machdesc_p->phys_offset = (uint64_t)PHYS_OFFSET;
+	machdesc_p->master_page_table = (uintptr_t)&swapper_pg_dir;
+
+	/* Allocate memory for saving cpu registers. */
+	crash_notes = alloc_percpu(note_buf_t);
+	if (!crash_notes) {
+		pr_err("MT-RAMDUMP: Memory allocation for saving cpu register failed\n");
+		return -ENOMEM;
+	}
+
+	pr_info("%s: init_done.\n", __func__);
+	return 0;
+}
 
 #if CONFIG_SYSFS
 
@@ -295,13 +366,13 @@ static ssize_t dump_status_show(struct kobject *kobj, struct kobj_attribute *att
 static ssize_t mrdump_version_show(struct kobject *kobj, struct kobj_attribute *attr,
 				  char *buf)
 {
-	return sprintf(buf, "%s\n", MRDUMP_GO_DUMP);
+	return snprintf(buf, PAGE_SIZE, "%s\n", MRDUMP_GO_DUMP);
 }
 
 static ssize_t manual_dump_show(struct kobject *kobj, struct kobj_attribute *attr,
 				char *buf)
 {
-	return sprintf(buf, "Trigger manual dump with message, format \"manualdump:HelloWorld\"\n");
+	return snprintf(buf, PAGE_SIZE, "%s\n", "Trigger manual dump with message, format \"manualdump:HelloWorld\"");
 }
 
 static ssize_t manual_dump_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -332,65 +403,10 @@ static struct attribute_group attr_group = {
 	.attrs = attrs,
 };
 
-#endif
-
-int __init mrdump_platform_init(const struct mrdump_platform *plat)
+static int __init mrdump_sysfs_init(void)
 {
-#if CONFIG_SYSFS
 	struct kobject *kobj;
-#endif
-	struct mrdump_machdesc *machdesc_p;
 
-	memset(&mrdump_cblock, 0, sizeof(struct mrdump_control_block));
-
-	mrdump_plat = plat;
-	if (mrdump_plat == NULL) {
-		mrdump_enable = 0;
-		pr_err("%s: MT-RAMDUMP platform no init\n", __func__);
-		return -EINVAL;
-	}
-
-	if (strcmp(mrdump_lk, MRDUMP_GO_DUMP) != 0) {
-		mrdump_enable = 0;
-		pr_err("%s: MT-RAMDUMP init failed, lk version %s not matched.\n", __func__, mrdump_lk);
-		return -EINVAL;
-	}
-
-	memcpy(&mrdump_cblock.sig, MRDUMP_GO_DUMP, 8);
-
-	/* move default enable MT-RAMDUMP to late_init (this function) */
-	if (mrdump_enable) {
-                 //changed by sony ramdump
-		mrdump_plat->hw_enable(mrdump_enable);
-		__inner_flush_dcache_all();
-	}
-
-	machdesc_p = &mrdump_cblock.machdesc;
-	machdesc_p->output_device = MRDUMP_DEV_EMMC;
-	machdesc_p->output_fstype = MRDUMP_FS_EXT4;
-	machdesc_p->nr_cpus = mrdump_enable ? NR_CPUS : 0;
-	machdesc_p->page_offset = (uint64_t)PAGE_OFFSET;
-	machdesc_p->high_memory = (uintptr_t)high_memory;
-
-	machdesc_p->vmalloc_start = (uint64_t)VMALLOC_START;
-	machdesc_p->vmalloc_end = (uint64_t)VMALLOC_END;
-
-	machdesc_p->modules_start = (uint64_t)MODULES_VADDR;
-	machdesc_p->modules_end = (uint64_t)MODULES_END;
-
-	machdesc_p->phys_offset = (uint64_t)PHYS_OFFSET;
-	machdesc_p->master_page_table = (uintptr_t)&swapper_pg_dir;
-
-	/* Allocate memory for saving cpu registers. */
-	crash_notes = alloc_percpu(note_buf_t);
-	if (!crash_notes) {
-		pr_err("MT-RAMDUMP: Memory allocation for saving cpu register failed\n");
-		return -ENOMEM;
-	}
-
-	atomic_notifier_chain_register(&panic_notifier_list, &mrdump_panic_blk);
-
-#if CONFIG_SYSFS
 	kobj = kset_find_obj(module_kset, KBUILD_MODNAME);
 	if (kobj) {
 		if (sysfs_create_group(kobj, &attr_group)) {
@@ -401,9 +417,14 @@ int __init mrdump_platform_init(const struct mrdump_platform *plat)
 		pr_err("MT-RAMDUMP: Cannot find module %s object\n", KBUILD_MODNAME);
 		return -EINVAL;
 	}
-#endif
+
+	pr_info("%s: init_done.\n", __func__);
 	return 0;
 }
+
+module_init(mrdump_sysfs_init);
+
+#endif
 
 static int param_set_mrdump_device(const char *val, const struct kernel_param *kp)
 {
@@ -445,13 +466,21 @@ static int param_get_mrdump_device(char *buffer, const struct kernel_param *kp)
 		break;
 	}
 
-	strcpy(buffer, dev);
+	strlcpy(buffer, dev, PAGE_SIZE);
 	return strlen(dev);
 }
 
 static int param_set_mrdump_enable(const char *val, const struct kernel_param *kp)
 {
-	int retval = 0;
+	int res, retval = 0;
+	struct wd_api *wd_api = NULL;
+
+	res = get_wd_api(&wd_api);
+	if (res < 0) {
+		pr_alert("wd_ddr_reserved_mode, get wd api error %d\n", res);
+		return res;
+	}
+
 	/* Always disable if version not matched...cannot enable manually. */
 	if ((mrdump_plat != NULL) && (0 == memcmp(mrdump_cblock.sig, MRDUMP_GO_DUMP, 8)) && !mrdump_rsv_conflict) {
 		retval = param_set_bool(val, kp);
@@ -504,7 +533,7 @@ static int param_get_mrdump_fstype(char *buffer, const struct kernel_param *kp)
 		dev = "none(unknown)";
 		break;
 	}
-	strcpy(buffer, dev);
+	strlcpy(buffer, dev, PAGE_SIZE);
 	return strlen(dev);
 }
 
@@ -560,79 +589,6 @@ param_check_int(device, &mrdump_output_device);
 module_param_cb(device, &param_ops_mrdump_device, &mrdump_output_device, S_IRUGO | S_IWUSR);
 __MODULE_PARM_TYPE(device, int);
 
-
-mrdump_rsvmem_block_t __initdata rsvmem_block[4];
-
-static __init char *find_next_mrdump_rsvmem(char *p, int len)
-{
-	char *tmp_p;
-
-	tmp_p = memchr(p, ',', len);
-	if (!tmp_p)
-		return NULL;
-	if (*(tmp_p+1) != 0) {
-		tmp_p = memchr(tmp_p+1, ',', strlen(tmp_p));
-		if (!tmp_p)
-			return NULL;
-	} else{
-		return NULL;
-	}
-	return tmp_p + 1;
-}
-static int __init early_mrdump_rsvmem(char *p)
-{
-	unsigned long start_addr, size;
-	int ret;
-	char *tmp_p = p;
-	int i;
-
-	for (i = 0; i < 4; i++) {
-		ret = sscanf(tmp_p, "0x%lx,0x%lx", &start_addr, &size);
-		if (ret != 2) {
-			pr_alert("%s:%s reserve failed ret=%d\n", __func__, p, ret);
-			return 0;
-		}
-		rsvmem_block[i].start_addr = start_addr;
-		rsvmem_block[i].size = size;
-		tmp_p = find_next_mrdump_rsvmem(tmp_p, strlen(tmp_p));
-		if (!tmp_p)
-			break;
-	}
-/*
-	for(i = 0;i<4;i++)
-	{
-		if(rsvmem_block[i].start_addr)
-			pr_err(" mrdump region start = %pa size =%pa\n",
-						&rsvmem_block[i].start_addr,&mrdump_rsvmem_block[i].size);
-	}
-*/
-	return 0;
-}
-
-__init void mrdump_rsvmem(void)
-{
-	int i;
-
-	for (i = 0; i < 4; i++) {
-		if (rsvmem_block[i].start_addr) {
-			if (!memblock_is_region_reserved(rsvmem_block[i].start_addr, rsvmem_block[i].size))
-				memblock_reserve(rsvmem_block[i].start_addr, rsvmem_block[i].size);
-			else {
-				/*even conflict , we still enable MRDUMP for temp
-				 * because MINI DUMP will reserve the memory in DTSI now
-				 * */
-#if 0
-				mrdump_rsv_conflict = 1;
-				mrdump_enable = 0;
-#endif
-				pr_err(" error mrdump region start = %pa size =%pa is reserved by others\n",
-						&rsvmem_block[i].start_addr, &rsvmem_block[i].size);
-			}
-		}
-	}
-}
-
-early_param("mrdump_rsvmem", early_mrdump_rsvmem);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("MediaTek MRDUMP module");

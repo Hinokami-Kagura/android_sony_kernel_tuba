@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef BATTERY_COMMON_H
 #define BATTERY_COMMON_H
 
@@ -24,8 +37,9 @@
 /* #define MAX_CHARGING_TIME             1*60*60         // 1hr */
 /* #define MAX_CHARGING_TIME                   8*60*60   // 8hr */
 /* #define MAX_CHARGING_TIME                   12*60*60  // 12hr */
+
 //CEI comments start//
-//Safety timer
+//Safety_timer
 //#define MAX_CHARGING_TIME                   (24*60*60)	/* 24hr */
 #define MAX_CHARGING_TIME                   (8*60*60)  // 8hr for AC charger
 #define PC_MAX_CHARGING_TIME             (20*60*60)  //20hr for PC charger
@@ -39,7 +53,11 @@
 
 
 #define MUTEX_TIMEOUT                       (5000)
-#define BAT_TASK_PERIOD                     (10)/* 10sec */
+#ifdef BAT_TASK_PERIOD_SECOND
+	#define BAT_TASK_PERIOD                     (BAT_TASK_PERIOD_SECOND)
+#else
+	#define BAT_TASK_PERIOD                     (10)
+#endif
 #define g_free_bat_temp					(100)0	/* 1 s */
 
 /*****************************************************************************
@@ -177,7 +195,13 @@ typedef unsigned char  BOOL;
   #define TRUE  (1)
 #endif
 
-
+typedef enum {
+	CHK_SC30_DATA_NONE = 0,
+	CHK_SC30_DATA_REQUEST,
+	CHK_SC30_DATA_DONE_RESET,
+	CHK_SC30_DATA_DONE_NOT_RESET,
+	CHK_SC30_DATA_ERROR
+} batt_chk_SC30_data_staus_enum;
 
 /*****************************************************************************
  *  structure
@@ -308,6 +332,14 @@ struct battery_custom_data {
 	int ta_9v_support;
 };
 
+typedef struct {
+	unsigned int time_A;
+	unsigned int time_B;
+	unsigned int time_C;
+	unsigned int time_T;
+	unsigned int low_cv;
+} SC30_TimeStruct;
+
 /*****************************************************************************
  *  Extern Variable
  ****************************************************************************/
@@ -318,20 +350,22 @@ extern kal_bool g_ftm_battery_flag;
 extern int charging_level_data[1];
 extern kal_bool g_call_state;
 extern kal_bool g_charging_full_reset_bat_meter;
-#if defined(CONFIG_MTK_PUMP_EXPRESS_SUPPORT) || defined(CONFIG_MTK_PUMP_EXPRESS_PLUS_SUPPORT)
+#if defined(CONFIG_MTK_PUMP_EXPRESS_SUPPORT)
 extern kal_bool ta_check_chr_type;
 extern kal_bool ta_cable_out_occur;
 extern kal_bool is_ta_connect;
 extern struct wake_lock TA_charger_suspend_lock;
 #endif
 
-#if defined(CONFIG_MTK_PUMP_EXPRESS_PLUS_20_SUPPORT)
-extern struct wake_lock PE20_charger_suspend_lock;
-extern kal_bool pe20_check_chr_type;
-extern kal_bool pe20_cable_out_occur;
-extern kal_bool is_pe20_connect;
-#endif
-
+extern SC30_TimeStruct sc30_daemon_time;
+extern kal_bool get_SC30_daemon_time;
+extern unsigned int time_A;
+extern unsigned int time_B;
+extern unsigned int time_C;
+extern unsigned int time_T;
+extern unsigned int low_cv;
+extern unsigned int sc30_en;
+extern unsigned int chk_sc30_data_status;
 
 /*****************************************************************************
  *  Extern Function
@@ -347,6 +381,10 @@ extern void do_chrdet_int_task(void);
 extern void set_usb_current_unlimited(bool enable);
 extern bool get_usb_current_unlimited(void);
 extern CHARGER_TYPE mt_get_charger_type(void);
+#if defined(CONFIG_USB_MTK_CHARGER_DETECT)
+extern CHARGER_TYPE usb_charger_type_detect(void);
+extern bool mt_get_usb11_port_status(void);
+#endif
 
 #if defined(CONFIG_MTK_HAFG_20)
 extern struct timespec mt_battery_get_duration_time_act(BATTERY_TIME_ENUM duration_type);
@@ -396,9 +434,9 @@ void check_battery_exist(void);
 #ifdef DLPT_POWER_OFF_EN
 	extern int dlpt_check_power_off(void);
 #endif
-#ifdef BATTERY_CDP_WORKAROUND
+
 extern kal_bool is_usb_rdy(void);
-#endif
+
 extern unsigned int upmu_get_reg_value(unsigned int reg);
 
 extern void mt_charger_enable_DP_voltage(int ison);

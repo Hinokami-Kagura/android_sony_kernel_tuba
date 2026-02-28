@@ -1,6 +1,20 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef __CCIF_PLATFORM_H__
 #define __CCIF_PLATFORM_H__
-#include "ccci_core.h"
+#include "ccci_config.h"
+#include "ccci_modem.h"
 #include <mt-plat/sync_write.h>
 
 #define ccif_write32(b, a, v)           mt_reg_sync_writel(v, (b)+(a))
@@ -90,14 +104,20 @@
 #define C2K_C2K_C2KPLL1_CON0    0x02013018
 #define C2K_C2K_CPPLL_CON0      0x02013040
 #define C2K_C2K_DSPPLL_CON0     0x02013050
+#define C2K_DEBUG_REG		0x0200B10C
 
+#define C2K_MPU_ITRACE		0x020050D0
+#define C2K_WD_MAX_TIME		0x02001084
 #define C2K_IRAM_BASE			0x01000000 /*0x39000000*/
 #define C2K_H2X_ZONE_BASE		0x00000000
+#define C2K_CLK_BASE			0x02000000
+#define C2K_PLL_BASE			0x02013000
 #define C2K_CGBR_SBC_BASE		0x0200B000
 #define C2K_BOOT_ROM_BASE		0x3FFF0000
 /*end of C2K side register*/
 #define C2K_IRAM_DUMP_SIZE		0x20
 #define C2K_BOOTROM_DUMP_SIZE		0x90
+#define C2K_MPU_ITRACE_DUMP_SIZE	0x20
 
 #define L1_C2K_CCIRQ_BASE		0x10211400
 #define C2K_L1_CCIRQ_BASE		0x10213400
@@ -148,7 +168,7 @@ struct c2k_pll_t {
 
 extern unsigned long ccci_modem_boot_count[];
 
-extern int md_ccif_power_off(struct ccci_modem *md, unsigned int timeout);
+extern int md_ccif_power_off(struct ccci_modem *md, unsigned int stop_type);
 extern int md_ccif_power_on(struct ccci_modem *md);
 extern int md_ccif_let_md_go(struct ccci_modem *md);
 int md_ccif_get_modem_hw_info(struct platform_device *dev_ptr,
@@ -156,7 +176,7 @@ int md_ccif_get_modem_hw_info(struct platform_device *dev_ptr,
 			      struct md_hw_info *hw_info);
 int md_ccif_io_remap_md_side_register(struct ccci_modem *md);
 void reset_md1_md3_pccif(struct ccci_modem *md);
-void dump_c2k_boot_status(struct ccci_modem *md);
+void dump_c2k_register(struct ccci_modem *md, unsigned int dump_flag);
 
 extern void mt_irq_set_sens(unsigned int irq, unsigned int sens);
 extern void mt_irq_set_polarity(unsigned int irq, unsigned int polarity);

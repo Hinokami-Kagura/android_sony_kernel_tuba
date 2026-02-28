@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #define pr_fmt(fmt) "["KBUILD_MODNAME"] " fmt
 #include <linux/module.h>
 #include <linux/device.h>
@@ -34,36 +47,6 @@ static atomic_t g_boot_init = ATOMIC_INIT(BM_UNINIT);
 static atomic_t g_boot_errcnt = ATOMIC_INIT(0);
 static atomic_t g_boot_status = ATOMIC_INIT(0);
 
-int special_flag = 0;
-
-static void parse_vu(void)
-{
-	char *ptr = NULL;
-	char *ptr_vu = NULL;
-
-	if(boot_command_line != NULL)
-	{
-		ptr = strstr(boot_command_line, "pu=");
-		ptr_vu = ptr + 3;
-
-		if ( (ptr != NULL) && (ptr_vu != NULL) )
-		{
-			if (*ptr_vu == '1')
-				special_flag = 1;
-			else if (*ptr_vu == '0')
-				special_flag = 0;
-
-			printk("\nparse_vu: special_flag = %d\n", special_flag);
-		}
-		else
-			printk("\nparse_vu: ptr = NULL\n");
-	}
-	else
-	{
-		printk("\nparse_vu: boot_command_line = NULL\n");
-	}
-}
-
 #ifdef CONFIG_OF
 struct tag_bootmode {
 	u32 size;
@@ -86,19 +69,10 @@ static int __init dt_get_boot_common(unsigned long node, const char *uname, int 
 		pr_warn("'atag,boot' is not found\n");
 	}
 
-    printk("g_boot_mode=%d, special_flag = %d\n", g_boot_mode, special_flag);
-
-    parse_vu();
-
 #ifdef DISABLE_FACTORY_MODE
 	if(g_boot_mode == FACTORY_BOOT)
-  	  g_boot_mode = NORMAL_BOOT;
-#else
-    if(special_flag == 1)
-      g_boot_mode = FACTORY_BOOT;
+		g_boot_mode = NORMAL_BOOT;
 #endif
-
-    printk("g_boot_mode=%d, special_flag = %d\n", g_boot_mode, special_flag);
 
 	/* break now */
 	return 1;

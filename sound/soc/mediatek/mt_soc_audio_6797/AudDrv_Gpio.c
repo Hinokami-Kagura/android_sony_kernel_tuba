@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -51,6 +53,9 @@
 #ifndef CONFIG_PINCTRL_MT6797
 #include <mt-plat/mt_gpio.h>
 #endif
+
+#include <linux/of.h>
+#include <linux/of_fdt.h>
 
 #ifdef CONFIG_PINCTRL_MT6797
 struct pinctrl *pinctrlaud;
@@ -126,6 +131,7 @@ static struct audio_gpio_attr aud_gpios[GPIO_NUM] = {
 };
 #endif
 
+static unsigned int extbuck_fan53526_exist;
 
 void AudDrv_GPIO_probe(void *dev)
 {
@@ -140,6 +146,21 @@ void AudDrv_GPIO_probe(void *dev)
 		ret = PTR_ERR(pinctrlaud);
 		pr_err("Cannot find pinctrlaud!\n");
 		return;
+	}
+
+	/* update hpdepop gpio by PCB version - extbuck fan53526 use gpio111 which may be used by hpdepop */
+	pr_warn("%s(), extbuck_fan53526_exist = %d\n", __func__, extbuck_fan53526_exist);
+	if (extbuck_fan53526_exist) { /* is e2 */
+		struct audio_gpio_attr gpio_hpdepop_high = {"hpdepop-pullhigh_e2", false, NULL};
+		struct audio_gpio_attr gpio_hpdepop_low = {"hpdepop-pulllow_e2", false, NULL};
+
+		aud_gpios[GPIO_HPDEPOP_HIGH] = gpio_hpdepop_high;
+		aud_gpios[GPIO_HPDEPOP_LOW] = gpio_hpdepop_low;
+
+		pr_warn("%s(), e2 PCB, update gpio name, high = %s, low = %s\n",
+			__func__,
+			aud_gpios[GPIO_HPDEPOP_HIGH].name,
+			aud_gpios[GPIO_HPDEPOP_LOW].name);
 	}
 
 	for (i = 0; i < ARRAY_SIZE(aud_gpios); i++) {
@@ -181,6 +202,11 @@ static int AudDrv_GPIO_Select(enum audio_system_gpio_type _type)
 
 static int set_aud_clk_mosi(bool _enable)
 {
+/*
+ * scp also need this gpio on mt6797,
+ * don't switch gpio if they exist.
+ */
+#ifndef CONFIG_MTK_TINYSYS_SCP_SUPPORT
 	static int aud_clk_mosi_counter;
 
 	if (_enable) {
@@ -199,7 +225,7 @@ static int set_aud_clk_mosi(bool _enable)
 		if (aud_clk_mosi_counter == 0)
 			return AudDrv_GPIO_Select(GPIO_AUD_CLK_MOSI_OFF);
 	}
-
+#endif
 	return 0;
 }
 
@@ -271,6 +297,7 @@ int AudDrv_GPIO_Request(bool _enable, Soc_Aud_Digital_Block _usage)
 		set_aud_dat_miso(_enable, _usage);
 		break;
 	case Soc_Aud_Digital_Block_ADDA_ANC:
+		set_aud_clk_mosi(_enable);
 		set_aud_dat_miso(_enable, _usage);
 		set_anc_dat_mosi(_enable);
 		break;
@@ -514,3 +541,33 @@ int AudDrv_GPIO_HPDEPOP_Select(int bEnable)
 
 	return retval;
 }
+
+static int __init dt_get_extbuck_info(unsigned long node, const char *uname, int depth, void *data)
+{
+	struct devinfo_extbuck_tag {
+		u32 size;
+		u32 tag;
+		u32 extbuck_fan53526_exist;
+	} *tags;
+	unsigned int size = 0;
+
+	if (depth != 1 || (strcmp(uname, "chosen") != 0 && strcmp(uname, "chosen@0") != 0))
+		return 0;
+
+	tags = (struct devinfo_extbuck_tag *) of_get_flat_dt_prop(node, "atag,extbuck_fan53526", &size);
+
+	if (tags) {
+		extbuck_fan53526_exist = tags->extbuck_fan53526_exist;
+		pr_warn("[%s] fan53526_exist = %d\n", __func__, extbuck_fan53526_exist);
+	}
+	return 0;
+}
+
+static int __init audio_drv_gpio_init(void)
+{
+	of_scan_flat_dt(dt_get_extbuck_info, NULL);
+
+	return 0;
+}
+
+arch_initcall(audio_drv_gpio_init);

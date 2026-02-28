@@ -1,7 +1,7 @@
 /*
  * This confidential and proprietary software may be used only as
  * authorised by a licensing agreement from ARM Limited
- * (C) COPYRIGHT 2012-2015 ARM Limited
+ * (C) COPYRIGHT 2012-2016 ARM Limited
  * ALL RIGHTS RESERVED
  * The entire notice above must be reproduced on all authorised
  * copies and copies may only be made to the extent permitted
@@ -179,7 +179,8 @@ static void timeline_print_obj(struct seq_file *s, struct sync_timeline *sync_tl
 		seq_printf(s, "next (%u)", mali_tl->point_next);
 		seq_printf(s, "\n");
 
-#if defined(MALI_TIMELINE_DEBUG_FUNCTIONS)
+//#if defined(MALI_TIMELINE_DEBUG_FUNCTIONS)
+#if 0
 		{
 			u32 tid = _mali_osk_get_tid();
 			struct mali_timeline_system *system = mali_tl->system;
@@ -235,7 +236,8 @@ static void timeline_value_str(struct sync_timeline *timeline, char *str, int si
 		_mali_osk_snprintf(str, size, "next (%u)", mali_tl->point_next);
 		_mali_osk_snprintf(str, size, "\n");
 
-#if defined(MALI_TIMELINE_DEBUG_FUNCTIONS)
+//#if defined(MALI_TIMELINE_DEBUG_FUNCTIONS)
+#if 0
 		{
 			u32 tid = _mali_osk_get_tid();
 			struct mali_timeline_system *system = mali_tl->system;
@@ -298,7 +300,12 @@ s32 mali_sync_fence_fd_alloc(struct sync_fence *sync_fence)
 {
 	s32 fd = -1;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
 	fd = get_unused_fd();
+#else
+	fd = get_unused_fd_flags(0);
+#endif
+
 	if (fd < 0) {
 		sync_fence_put(sync_fence);
 		return -1;

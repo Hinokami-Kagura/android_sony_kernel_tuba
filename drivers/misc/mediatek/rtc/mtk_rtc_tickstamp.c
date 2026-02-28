@@ -140,6 +140,10 @@ static void ts_read_stamp(struct work_struct *work) {
 	unsigned long flags;
 	struct tick_stamp stamp;
 
+
+    // wait system partition firstly, to prevent accessing cache partition mounted by /sbin/mr
+    VOID_EXIT_IF(!wait_vfsmount("/system/bin", 1000 , INFINITY));
+
 	ts_read_work = container_of(work, struct ts_work_struct, work);
 	VOID_EXIT_IF(!wait_vfsmount(TS_DIR, ts_read_work->trigger_interval,
 		ts_read_work->retrigger_count));

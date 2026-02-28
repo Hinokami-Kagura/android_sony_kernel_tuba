@@ -62,11 +62,11 @@ static void __cpuinit write_pen_release(int val)
 
 void __cpuinit mt_smp_secondary_init(unsigned int cpu)
 {
-	pr_debug("Slave cpu init\n");
-	HOTPLUG_INFO("platform_secondary_init, cpu: %d\n", cpu);
-
+	/*pr_debug("Slave cpu init\n");
+	HOTPLUG_INFO("platform_secondary_init, cpu: %d\n", cpu);*/
+#ifndef CONFIG_MTK_GIC
 	mt_gic_secondary_init();
-
+#endif
 	/*
 	 * let the primary processor know we're out of the
 	 * pen, then head off into the C entry point
@@ -107,7 +107,7 @@ int __cpuinit mt_smp_boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
 	unsigned long timeout;
 
-	pr_crit("Boot slave CPU\n");
+	/*pr_crit("Boot slave CPU\n");*/
 
 	atomic_inc(&hotplug_cpu_count);
 
@@ -117,7 +117,7 @@ int __cpuinit mt_smp_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 */
 	spin_lock(&boot_lock);
 
-	HOTPLUG_INFO("mt_smp_boot_secondary, cpu: %d\n", cpu);
+	/*HOTPLUG_INFO("mt_smp_boot_secondary, cpu: %d\n", cpu);*/
 	/*
 	 * The secondary processor is waiting to be released from
 	 * the holding pen - release it, then wait for it to flag
@@ -135,6 +135,13 @@ int __cpuinit mt_smp_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	write_pen_release(cpu);
 
 	switch (cpu) {
+	case 0:
+#ifdef CONFIG_MTK_FPGA
+		mt_reg_sync_writel(SLAVE0_MAGIC_NUM, SLAVE0_MAGIC_REG);
+		HOTPLUG_INFO("SLAVE0_MAGIC_NUM:%x\n", SLAVE0_MAGIC_NUM);
+#endif
+		spm_mtcmos_ctrl_cpu0(STA_POWER_ON, 1);
+		break;
 	case 1:
 #ifdef CONFIG_MTK_FPGA
 		mt_reg_sync_writel(SLAVE1_MAGIC_NUM, SLAVE1_MAGIC_REG);
@@ -155,6 +162,59 @@ int __cpuinit mt_smp_boot_secondary(unsigned int cpu, struct task_struct *idle)
 		HOTPLUG_INFO("SLAVE3_MAGIC_NUM:%x\n", SLAVE3_MAGIC_NUM);
 #endif
 		spm_mtcmos_ctrl_cpu3(STA_POWER_ON, 1);
+		break;
+
+	case 4:
+		#ifdef CONFIG_MTK_FPGA
+		mt_reg_sync_writel(SLAVE4_MAGIC_NUM, SLAVE4_MAGIC_REG);
+		HOTPLUG_INFO("SLAVE4_MAGIC_NUM:%x\n", SLAVE4_MAGIC_NUM);
+		#endif
+		spm_mtcmos_ctrl_cpu4(STA_POWER_ON, 1);
+		break;
+
+	case 5:
+		if ((cpu_online(4) == 0) && (cpu_online(6) == 0) &&
+		    (cpu_online(7) == 0)) {
+			HOTPLUG_INFO("up CPU%d fail, CPU4 first\n", cpu);
+			spin_unlock(&boot_lock);
+			atomic_dec(&hotplug_cpu_count);
+			return -ENOSYS;
+		}
+		#ifdef CONFIG_MTK_FPGA
+		mt_reg_sync_writel(SLAVE5_MAGIC_NUM, SLAVE5_MAGIC_REG);
+		HOTPLUG_INFO("SLAVE5_MAGIC_NUM:%x\n", SLAVE5_MAGIC_NUM);
+		#endif
+		spm_mtcmos_ctrl_cpu5(STA_POWER_ON, 1);
+		break;
+
+	case 6:
+		if ((cpu_online(4) == 0) && (cpu_online(5) == 0) &&
+		    (cpu_online(7) == 0)) {
+			HOTPLUG_INFO("up CPU%d fail, CPU4 first\n", cpu);
+			spin_unlock(&boot_lock);
+			atomic_dec(&hotplug_cpu_count);
+			return -ENOSYS;
+		}
+		#ifdef CONFIG_MTK_FPGA
+		mt_reg_sync_writel(SLAVE6_MAGIC_NUM, SLAVE6_MAGIC_REG);
+		HOTPLUG_INFO("SLAVE6_MAGIC_NUM:%x\n", SLAVE6_MAGIC_NUM);
+		#endif
+		spm_mtcmos_ctrl_cpu6(STA_POWER_ON, 1);
+		break;
+
+	case 7:
+		if ((cpu_online(4) == 0) && (cpu_online(5) == 0) &&
+		    (cpu_online(6) == 0)) {
+			HOTPLUG_INFO("up CPU%d fail, CPU4 first\n", cpu);
+			spin_unlock(&boot_lock);
+			atomic_dec(&hotplug_cpu_count);
+			return -ENOSYS;
+		}
+		#ifdef CONFIG_MTK_FPGA
+		mt_reg_sync_writel(SLAVE7_MAGIC_NUM, SLAVE7_MAGIC_REG);
+		HOTPLUG_INFO("SLAVE7_MAGIC_NUM:%x\n", SLAVE7_MAGIC_NUM);
+		#endif
+		spm_mtcmos_ctrl_cpu7(STA_POWER_ON, 1);
 		break;
 
 	default:
@@ -206,8 +266,9 @@ void __init mt_smp_init_cpus(void)
 	pr_emerg("@@@### num_possible_cpus(): %u ###@@@\n",
 		num_possible_cpus());
 	pr_emerg("@@@### num_present_cpus(): %u ###@@@\n", num_present_cpus());
-
+#ifndef CONFIG_MTK_GIC
 	irq_total_secondary_cpus = num_possible_cpus() - 1;
+#endif
 }
 
 void __init mt_smp_prepare_cpus(unsigned int max_cpus)

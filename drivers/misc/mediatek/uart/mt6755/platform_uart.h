@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef __MTK_PLAT_UART_H__
 #define __MTK_PLAT_UART_H__
 
@@ -28,6 +41,13 @@
 #if defined(ENABLE_VFIFO) && defined(ENABLE_DEBUG)
 #define ENABLE_VFIFO_DEBUG
 #endif
+
+#define ENABLE_CONSOLE_DEBUG
+#if defined(ENABLE_CONSOLE_DEBUG)
+#define UART_INFRA(_b)			(_b+0x0090)
+#define UART_INFRA_READ32(REG)          (*(volatile unsigned int *)(REG))
+#endif /*--ENABLE_CONSOLE_DEBUG--*/
+
 /******************************************************************************
  * MACRO & CONSTANT
 ******************************************************************************/
@@ -228,6 +248,9 @@ enum {
 #define UART_FRACDIV_M       (unsigned long)(base+0x58)
 #define UART_FCR_RD          (unsigned long)(base+0x5C)
 #define UART_ACTIVE_EN       (unsigned long)(base+0x60)
+#define UART_DLL_E           (unsigned long)(base+0x90)
+#define UART_DLH_E           (unsigned long)(base+0x94)
+#define UART_FEATURE_SEL     (unsigned long)(base+0x9C)
 #define UART_RX_SEL          (unsigned long)(base+0xB0)
 #define UART_SLEEP_REQ       (unsigned long)(base+0xB4)
 #define UART_SLEEP_ACK       (unsigned long)(base+0xB8)

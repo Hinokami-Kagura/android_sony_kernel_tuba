@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
@@ -12,7 +25,7 @@
 
 #include "mt_spm_idle.h"
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 #include <irq.h>
 #endif
 
@@ -31,7 +44,7 @@ void __weak aee_kernel_warning_api(const char *file, const int line, const int d
 {
 }
 
-#if defined(CONFIG_ARCH_MT6580)
+#if defined(CONFIG_ARCH_MT6570) || defined(CONFIG_ARCH_MT6580)
 #define ENABLE_DYNA_LOAD_PCM
 #endif
 
@@ -78,7 +91,7 @@ static struct cdev gSPMDetectCdev;
 
 
 #ifdef CONFIG_OF
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 void __iomem *spm_base;
 void __iomem *scp_i2c0_base;
 void __iomem *scp_i2c1_base;
@@ -238,10 +251,10 @@ static int spm_irq_register(void)
 #ifndef CONFIG_ARM64
 		/* assign each SPM IRQ to each CPU */
 		mt_gic_cfg_irq2cpu(irqdesc[i].irq, 0, 0);
-		mt_gic_cfg_irq2cpu(irqdesc[i].irq, i % num_possible_cpus(), 1);
+		mt_gic_cfg_irq2cpu(irqdesc[i].irq, i, 1);
 #endif
 	}
-#if defined(CONFIG_ARCH_MT6580)
+#if defined(CONFIG_ARCH_MT6570) || defined(CONFIG_ARCH_MT6580)
 	mt_gic_set_priority(SPM_IRQ0_ID);
 #endif
 	return r;
@@ -250,7 +263,7 @@ static int spm_irq_register(void)
 static void spm_register_init(void)
 {
 	unsigned long flags;
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	unsigned int code = mt_get_chip_hw_code();
 #endif
 #if defined(CONFIG_ARCH_MT6753)
@@ -300,7 +313,7 @@ static void spm_register_init(void)
 	}
 #endif
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	node = of_find_compatible_node(NULL, NULL, "mediatek,SCP_I2C0");
 	if (!node)
 		spm_err("find SCP_I2C0 node failed\n");
@@ -321,13 +334,6 @@ static void spm_register_init(void)
 	scp_i2c2_base = of_iomap(node, 0);
 	if (!scp_i2c2_base)
 		spm_err("base scp_i2c2_base failed\n");
-
-	node = of_find_compatible_node(NULL, NULL, "mediatek,I2C4");
-	if (!node)
-		spm_err("find I2C4 node failed\n");
-	i2c4_base = of_iomap(node, 0);
-	if (!i2c4_base)
-		spm_err("base i2c4_base failed\n");
 
 	spm_err
 	    ("spm_base = %p, scp_i2c0_base = %p, scp_i2c1_base = %p, scp_i2c2_base = %p\n",
@@ -414,7 +420,7 @@ static void spm_register_init(void)
 	spm_write(SPM_PCM_IM_PTR, 0);
 	spm_write(SPM_PCM_IM_LEN, 0);
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	/*
 	 * SRCLKENA0: POWER_ON_VAL1 (PWR_IO_EN[7]=0) or
 	 *            E1: r7|SRCLKENAI0|SRCLKENAI1|MD1_SRCLKENA (PWR_IO_EN[7]=1)
@@ -470,8 +476,9 @@ int spm_module_init(void)
 {
 	int r = 0;
 	/* This following setting is moved to LK by WDT init, because of DTS init level issue */
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	struct wd_api *wd_api;
+	int wd_ret;
 #endif
 
 	spm_register_init();
@@ -481,7 +488,7 @@ int spm_module_init(void)
 
 #ifndef CONFIG_MTK_FPGA
 #if defined(CONFIG_PM)
-#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6580) \
+#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6570) || defined(CONFIG_ARCH_MT6580) \
 	|| defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
 	if (spm_fs_init() != 0)
 		r = -EPERM;
@@ -489,20 +496,24 @@ int spm_module_init(void)
 #endif
 #endif
 
-#if !defined(CONFIG_ARCH_MT6580)
-	get_wd_api(&wd_api);
-	if (wd_api->wd_spmwdt_mode_config) {
-		wd_api->wd_spmwdt_mode_config(WD_REQ_EN, WD_REQ_RST_MODE);
-	} else {
-		spm_err("FAILED TO GET WD API\n");
-		r = -ENODEV;
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
+	wd_ret = get_wd_api(&wd_api);
+	if (!wd_ret) {
+		if (wd_api->wd_spmwdt_mode_config) {
+			wd_api->wd_spmwdt_mode_config(WD_REQ_EN, WD_REQ_RST_MODE);
+		} else {
+			spm_err("FAILED TO GET WD API\n");
+			r = -ENODEV;
+		}
 	}
 #endif
 
 #ifndef CONFIG_MTK_FPGA
+#if !defined(CONFIG_ARCH_MT6570)
 	spm_sodi_init();
 	/* spm_mcdi_init(); */
-#if !defined(CONFIG_ARCH_MT6580)
+#endif
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	spm_deepidle_init();
 #endif
 #endif
@@ -512,7 +523,7 @@ int spm_module_init(void)
 		aee_kernel_warning("SPM Warring", "dram golden setting mismach");
 	}
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 	spm_set_pcm_init_flag();
 #endif
 
@@ -846,7 +857,7 @@ struct ddrphy_golden_cfg {
 };
 
 static struct ddrphy_golden_cfg ddrphy_setting[] = {
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 #ifdef CONFIG_OF
 	{0x5c0, 0x063c0000},
 	{0x5c4, 0x00000000},
@@ -892,7 +903,7 @@ int spm_golden_setting_cmp(bool en)
 	ddrphy_num = sizeof(ddrphy_setting) / sizeof(ddrphy_setting[0]);
 	for (i = 0; i < ddrphy_num; i++) {
 #ifdef CONFIG_OF
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 		if (ucDram_Register_Read(ddrphy_setting[i].addr) != ddrphy_setting[i].value) {
 			spm_err("dramc setting mismatch addr: 0x%x, val: 0x%x\n",
 				ddrphy_setting[i].addr,
@@ -919,7 +930,7 @@ int spm_golden_setting_cmp(bool en)
 	return r;
 }
 
-#if !defined(CONFIG_ARCH_MT6580)
+#if !defined(CONFIG_ARCH_MT6570) && !defined(CONFIG_ARCH_MT6580)
 /*
  * SPM AP-BSI Protocol Generator
  */

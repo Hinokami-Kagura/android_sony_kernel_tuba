@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _CUST_BAT_H_
 #define _CUST_BAT_H_
 
@@ -53,17 +66,16 @@
 #define USB_CHARGER_CURRENT					CHARGE_CURRENT_500_00_MA	/* 500mA */
 #define USB_IBAT_CURRENT					CHARGE_CURRENT_525_00_MA	/* CEI comment: Will set 512mA to charger IC*/
 /* #define AC_CHARGER_CURRENT					CHARGE_CURRENT_650_00_MA */
-//Set IBAT at 2300mA
-#define AC_CHARGER_CURRENT					CHARGE_CURRENT_1856_00_MA // change from CHARGE_CURRENT_2300_00_MA to CHARGE_CURRENT_1856_00_MA
-//Set IUSB at 1500mA
-#define AC_CHARGER_INPUT_CURRENT				CHARGE_CURRENT_1500_00_MA
+#define AC_CHARGER_CURRENT					CHARGE_CURRENT_1856_00_MA // MTK ORG = CHARGE_CURRENT_2050_00_MA
+#define AC_CHARGER_INPUT_CURRENT				CHARGE_CURRENT_1500_00_MA // MTK ORG = CHARGE_CURRENT_3200_00_MA
 #define NON_STD_AC_CHARGER_CURRENT			CHARGE_CURRENT_500_00_MA
 #define CHARGING_HOST_CHARGER_CURRENT       CHARGE_CURRENT_650_00_MA
 #define APPLE_0_5A_CHARGER_CURRENT          CHARGE_CURRENT_500_00_MA
 #define APPLE_1_0A_CHARGER_CURRENT          CHARGE_CURRENT_650_00_MA
 #define APPLE_2_1A_CHARGER_CURRENT          CHARGE_CURRENT_800_00_MA
 #endif
-//CEI comment end//
+
+
 
 
 /* Precise Tunning */
@@ -93,7 +105,7 @@
 /* #define BATTERY_NOTIFY_CASE_0003_ICHARGING */
 /* #define BATTERY_NOTIFY_CASE_0004_VBAT */
 //CEI comment start//
-//Safety timer
+//Safety_timer
 #define BATTERY_NOTIFY_CASE_0005_TOTAL_CHARGINGTIME
 //CEI comment end//
 
@@ -156,15 +168,12 @@
 #endif
 
 /*VINDPM moved from cust_pe.h to de-relating from PE+*/
-//CEI comment start//
-//Change from 4.5V to 4.4V
-#define SWITCH_CHR_VINDPM_5V 0x12  /* 4.4V */
-//CEI comment end//
+#define SWITCH_CHR_VINDPM_5V 0x13  /* 4.5V */
 #define SWITCH_CHR_VINDPM_7V 0x25  /* 6.3V */
 #define SWITCH_CHR_VINDPM_9V 0x37  /* 8.1V */
 #define SWITCH_CHR_VINDPM_12V 0x54 /* 11.0 set this tp prevent adapters from failure and reset*/
 
-/*Added switch chr OPTIONS for BQ25896 on Jade*/
+/*Added switch chr OPTIONS for BQ25896*/
 /*switch charger input/output current separation; moved to Kconfig.driver*/
 /*#define CONFIG_MTK_SWITCH_INPUT_OUTPUT_CURRENT_SUPPORT*/
 /*Dynamic CV using BIF
@@ -176,7 +185,7 @@
 /*enable to save charger in detection power by turning off Chr clock*/
 #define CONFIG_MTK_CHRIND_CLK_PDN_SUPPORT
 
-/*Added battery_common options for jade*/
+/*Added battery_common options*/
 /*enable this to change thread wakeup period to 10 secs to avoid suspend failure*/
 #define CONFIG_MTK_I2C_CHR_SUPPORT
 
@@ -190,6 +199,9 @@
 #define SWCHR_POWER_PATH
 #endif
 
+//CEI comment start// //Check//
+//Need check the meaning of EXTERNAL_SWCHR_SUPPORT//
+//CEI comment end//
 #if defined(CONFIG_MTK_FAN5402_SUPPORT) \
 	|| defined(CONFIG_MTK_FAN5405_SUPPORT) \
 	|| defined(CONFIG_MTK_BQ24158_SUPPORT) \

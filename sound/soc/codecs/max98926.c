@@ -589,11 +589,11 @@ static inline int max98926_rate_value(struct snd_soc_codec *codec,
 			*n = rate_table[i].divisors[clock][0];
 			*m = rate_table[i].divisors[clock][1];
 			ret = 0;
+			dev_dbg(codec->dev, "%s: sample rate is %d, returning %d\n",
+				__func__, rate_table[i].rate, *value);
 			break;
 		}
 	}
-	dev_dbg(codec->dev, "%s: sample rate is %d, returning %d\n",
-		__func__, rate_table[i].rate, *value);
 	return ret;
 }
 
@@ -852,7 +852,7 @@ static int max98926_probe(struct snd_soc_codec *codec)
 	snd_soc_write(codec, max98926_DOUT_HIZ_CFG4, 0xCC);
 	snd_soc_write(codec, max98926_FILTERS, 0xD8);
 	snd_soc_write(codec, max98926_ALC_CONFIGURATION, 0xF8);
-	snd_soc_write(codec, max98926_GAIN, 0x0F);
+	snd_soc_write(codec, max98926_GAIN, 0x0D);
 
 	/* Disable ALC muting */
 

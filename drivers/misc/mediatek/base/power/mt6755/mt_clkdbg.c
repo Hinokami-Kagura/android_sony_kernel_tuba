@@ -1,3 +1,16 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
+
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
@@ -225,7 +238,11 @@ static void __iomem *scpsys_base;	/* 0x10006000 */
 
 static bool is_valid_reg(void __iomem *addr)
 {
-	return ((u64)addr & 0xf0000000) || (((u64)addr >> 32) & 0xf0000000);
+	#ifndef CONFIG_ARM64
+		return 1;
+	#else
+		return ((u64)addr & 0xf0000000) || (((u64)addr >> 32) & 0xf0000000);
+	#endif
 }
 
 enum FMETER_TYPE {
@@ -1520,14 +1537,14 @@ static char last_cmd[128] = "null";
 
 static int clkdbg_prepare_enable(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *clk_name;
 	struct clk *clk;
 	int r;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	clk_name = strsep(&c, " ");
@@ -1548,13 +1565,13 @@ static int clkdbg_prepare_enable(struct seq_file *s, void *v)
 
 static int clkdbg_disable_unprepare(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *clk_name;
 	struct clk *clk;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	clk_name = strsep(&c, " ");
@@ -1575,7 +1592,7 @@ static int clkdbg_disable_unprepare(struct seq_file *s, void *v)
 
 static int clkdbg_set_parent(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *clk_name;
@@ -1584,7 +1601,7 @@ static int clkdbg_set_parent(struct seq_file *s, void *v)
 	struct clk *parent;
 	int r;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	clk_name = strsep(&c, " ");
@@ -1614,7 +1631,7 @@ static int clkdbg_set_parent(struct seq_file *s, void *v)
 
 static int clkdbg_set_rate(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *clk_name;
@@ -1623,7 +1640,7 @@ static int clkdbg_set_rate(struct seq_file *s, void *v)
 	unsigned long rate;
 	int r;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	clk_name = strsep(&c, " ");
@@ -1673,14 +1690,14 @@ void *reg_from_str(const char *str)
 
 static int parse_reg_val_from_cmd(void __iomem **preg, unsigned long *pval)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *reg_str;
 	char *val_str;
 	int r = 0;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	reg_str = strsep(&c, " ");
@@ -1901,13 +1918,13 @@ static int clkdbg_dump_genpd(struct seq_file *s, void *v)
 
 static int clkdbg_pm_genpd_poweron(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *genpd_name;
 	struct generic_pm_domain *pd;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	genpd_name = strsep(&c, " ");
@@ -1936,13 +1953,13 @@ static int clkdbg_pm_genpd_poweroff_unused(struct seq_file *s, void *v)
 
 static int clkdbg_pm_runtime_enable(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *dev_name;
 	struct platform_device *pdev;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	dev_name = strsep(&c, " ");
@@ -1962,13 +1979,13 @@ static int clkdbg_pm_runtime_enable(struct seq_file *s, void *v)
 
 static int clkdbg_pm_runtime_disable(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *dev_name;
 	struct platform_device *pdev;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	dev_name = strsep(&c, " ");
@@ -1988,13 +2005,13 @@ static int clkdbg_pm_runtime_disable(struct seq_file *s, void *v)
 
 static int clkdbg_pm_runtime_get_sync(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *dev_name;
 	struct platform_device *pdev;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	dev_name = strsep(&c, " ");
@@ -2015,13 +2032,13 @@ static int clkdbg_pm_runtime_get_sync(struct seq_file *s, void *v)
 
 static int clkdbg_pm_runtime_put_sync(struct seq_file *s, void *v)
 {
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 	char *c = cmd;
 	char *ign;
 	char *dev_name;
 	struct platform_device *pdev;
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	ign = strsep(&c, " ");
 	dev_name = strsep(&c, " ");
@@ -2077,11 +2094,11 @@ static int clkdbg_show(struct seq_file *s, void *v)
 	};
 
 	int i;
-	char cmd[sizeof(last_cmd)];
+	char cmd[sizeof(last_cmd) + 1];
 
 	pr_debug("last_cmd: %s\n", last_cmd);
 
-	strcpy(cmd, last_cmd);
+	strncpy(cmd, last_cmd, sizeof(last_cmd));
 
 	for (i = 0; i < ARRAY_SIZE(cmds); i++) {
 		char *c = cmd;
@@ -2105,7 +2122,7 @@ static ssize_t clkdbg_write(
 		size_t count,
 		loff_t *data)
 {
-	char desc[sizeof(last_cmd)];
+	char desc[sizeof(last_cmd) - 1];
 	int len = 0;
 
 	pr_debug("count: %zu\n", count);
@@ -2114,7 +2131,7 @@ static ssize_t clkdbg_write(
 		return 0;
 
 	desc[len] = '\0';
-	strcpy(last_cmd, desc);
+	strncpy(last_cmd, desc, sizeof(last_cmd));
 	if (last_cmd[len - 1] == '\n')
 		last_cmd[len - 1] = 0;
 

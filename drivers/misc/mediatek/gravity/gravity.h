@@ -1,6 +1,18 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef __GRAV_H__
 #define __GRAV_H__
-
 
 #include <linux/wakelock.h>
 #include <linux/interrupt.h>
@@ -10,9 +22,19 @@
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/hwmsensor.h>
-#include <linux/earlysuspend.h>
-#include <linux/hwmsen_dev.h>
+
+#include <linux/i2c.h>
+#include <linux/irq.h>
+#include <linux/uaccess.h>
+#include <linux/delay.h>
+#include <linux/kobject.h>
+#include <linux/atomic.h>
+#include <linux/ioctl.h>
+
+#include <batch.h>
+#include <sensors_io.h>
+#include <hwmsen_helper.h>
+#include <hwmsensor.h>
 
 #define DEBUG
 
@@ -37,10 +59,12 @@
 
 #define GRAV_INVALID_VALUE -1
 
-#define EVENT_TYPE_GRAV_X              ABS_RX
-#define EVENT_TYPE_GRAV_Y              ABS_Y
-#define EVENT_TYPE_GRAV_Z              ABS_Z
+#define EVENT_TYPE_GRAV_X              REL_RX
+#define EVENT_TYPE_GRAV_Y              REL_RY
+#define EVENT_TYPE_GRAV_Z              REL_RZ
 #define EVENT_TYPE_GRAV_STATUS         REL_X
+#define EVENT_TYPE_GRAV_TIMESTAMP_HI	REL_HWHEEL
+#define EVENT_TYPE_GRAV_TIMESTAMP_LO	REL_DIAL
 
 #define GRAV_VALUE_MAX (32767)
 #define GRAV_VALUE_MIN (-32768)
@@ -78,7 +102,7 @@ struct grav_init_info {
 };
 
 struct grav_data {
-	hwm_sensor_data grav_data;
+	struct hwm_sensor_data grav_data;
 	int data_updata;
 	/* struct mutex lock; */
 };
@@ -100,7 +124,6 @@ struct grav_context {
 	struct timer_list   timer;  /* polling timer */
 	atomic_t            trace;
 	atomic_t			enable;
-	struct early_suspend    early_drv;
 	atomic_t                early_suspend;
 	/* struct grav_drv_obj    drv_obj; */
 	struct grav_data       drv_data;
@@ -121,7 +144,7 @@ struct grav_context {
 
 /* for auto detect */
 extern int grav_driver_add(struct grav_init_info *obj);
-extern int grav_data_report(int x, int y, int z, int status);
+extern int grav_data_report(int x, int y, int z, int status, int64_t nt);
 extern int grav_register_control_path(struct grav_control_path *ctl);
 extern int grav_register_data_path(struct grav_data_path *data);
 #endif

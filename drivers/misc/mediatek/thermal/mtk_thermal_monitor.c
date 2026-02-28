@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifdef pr_fmt
 #undef pr_fmt
 #endif
@@ -173,7 +186,7 @@ do { \
 /* ************************************ */
 #if defined(CONFIG_MTK_THERMAL_TIME_BASE_PROTECTION)
 #include <mach/mt_gpt.h>
-#include <mach/mt_sleep.h>
+#include <mt_sleep.h>
 #include <linux/wakelock.h>
 
 /* extern int force_get_tbat(void); */
@@ -715,6 +728,8 @@ static int mtk_thermal_get_tz_idx(char *type)
 		return MTK_THERMAL_SENSOR_SKIN;
 	else if (0 == strncmp(type, "mtktsxtal", 9))
 		return MTK_THERMAL_SENSOR_XTAL;
+	else if (0 == strncmp(type, "mtktsbtsmdpa", 12))
+		return MTK_THERMAL_SENSOR_MD_PA;
 
 	return -1;
 }
@@ -821,7 +836,6 @@ static int mtk_sysinfo_get_info(unsigned int mask)
 	int i;
 	int nocpucores = 0, *cpufreqs, *cpuloadings;
 	int nogpucores = 0, *gpufreqs, *gpuloadings;
-	int noextraattr = 0;
 
 	if (mask == 0x0)
 		return 0;
@@ -861,12 +875,6 @@ static int mtk_sysinfo_get_info(unsigned int mask)
 		}
 	}
 	mutex_unlock(&MTM_SYSINFO_LOCK);
-
-	/* print extra info */
-	for (i = 0; i < noextraattr; i++) {
-		THRML_STORAGE_LOG(THRML_LOGGER_MSG_MISC_EX_INFO, get_misc_ex_info, attrnames[i],
-				  attrvalues[i], attrunits[i]);
-	}
 
 	/* print batt info */
 	if (mask & THERMAL_SYS_INFO_BATT) {
@@ -1174,7 +1182,7 @@ static ssize_t _mtkthermal_cooler_write(struct file *file, const char __user *bu
 #if (3 == MTK_THERMAL_MONITOR_COOLER_MAX_EXTRA_CONDITIONS)
 	_mtkthermal_clear_cooler_conditions(mcdata);
 
-	if (2 <= sscanf(desc, "%s %d %s %d %s %d",
+	if (2 <= sscanf(desc, "%19s %d %19s %d %19s %d",
 			&mcdata->conditions[0][0], &mcdata->threshold[0],
 			&mcdata->conditions[1][0], &mcdata->threshold[1],
 			&mcdata->conditions[2][0], &mcdata->threshold[2])) {
@@ -1313,7 +1321,7 @@ static ssize_t _mtkthermal_tz_write(struct file *file, const char __user *buffer
 		return -EINVAL;
 	}
 
-	if (2 <= sscanf(desc, "%s %d %s", arg_name, &arg_val, trailing)) {
+	if (2 <= sscanf(desc, "%31s %d %127s", arg_name, &arg_val, trailing)) {
 		if ((0 == strncmp(arg_name, "ma_len", 6)) && (arg_val >= 1) && (arg_val <= 60)) {
 			struct mtk_thermal_tz_data *tzdata = NULL;
 
@@ -1737,8 +1745,13 @@ static int mtk_thermal_wrapper_unbind
 		/* Clear cldata->tz */
 		if (thermal == cldata->tz) {
 			/* clear the state of cooler bounded first... */
-			if (cdev->ops)
+			if (cdev->ops) {
+				int tmp_exit_pt = cldata->exit_threshold;
+
+				cldata->exit_threshold = 0;
 				cdev->ops->set_cur_state(cdev, 0);
+				cldata->exit_threshold = tmp_exit_pt;
+			}
 
 			cldata->tz = NULL;
 			cldata->trip = 0;
@@ -2468,6 +2481,29 @@ const struct thermal_cooling_device_ops_extra *ops_ext){
 	return ret;
 }
 EXPORT_SYMBOL(mtk_thermal_cooling_device_register_wrapper_extra);
+
+int mtk_thermal_cooling_device_add_exit_point(struct thermal_cooling_device *cdev, int exit_point)
+{
+	struct mtk_thermal_cooler_data *mcdata;
+
+	if (!cdev)
+		return -1;
+
+	mutex_lock(&MTM_COOLER_LOCK);
+	mcdata = cdev->devdata;
+
+	if (!mcdata) {
+		mutex_unlock(&MTM_COOLER_LOCK);
+		return -1;
+	}
+
+	mcdata->exit_threshold = exit_point;
+	mutex_unlock(&MTM_COOLER_LOCK);
+
+	THRML_LOG("%s type:%s exit:%d\n", __func__, cdev->type, exit_point);
+	return 0;
+}
+EXPORT_SYMBOL(mtk_thermal_cooling_device_add_exit_point);
 
 /*
  * MTK Cooling Unregister

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <generated/autoconf.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -155,7 +168,8 @@ unsigned int emmc_get_wp_size(void)
 		} else {
 			/* use old erase group size and
 			   write protect group size, store in CSD */
-			sg_wp_size = (512 * host_ctl->mmc->card->erase_size);
+			sg_wp_size = (512 * host_ctl->mmc->card->erase_size) *
+				(write_prot_grpsz + 1);
 			pr_err("otp: non-hc unit sg_wp_size %d\n", sg_wp_size);
 		}
 	}
@@ -219,6 +233,10 @@ unsigned int emmc_otp_read(unsigned int blk_offset, void *BufferPtr)
 	struct mmc_command msdc_cmd;
 	struct mmc_request msdc_mrq;
 	struct msdc_host *host_ctl;
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	int is_cmdq_en;
+	int ret;
+#endif
 
 	/* check parameter */
 	l_addr = emmc_otp_start();
@@ -237,6 +255,20 @@ unsigned int emmc_otp_read(unsigned int blk_offset, void *BufferPtr)
 		host_ctl->mmc);
 	mmc_claim_host(host_ctl->mmc);
 
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	is_cmdq_en = false;
+	if (host_ctl->mmc->card->ext_csd.cmdq_mode_en) {
+		/* cmdq enabled, turn it off first */
+		pr_debug("EMMC_OTP: cmdq enabled, turn it off\n");
+		is_cmdq_en = true;
+		ret = mmc_blk_cmdq_switch(host_ctl->mmc->card, 0);
+		if (ret) {
+			pr_debug("EMMC_OTP turn off cmdq en failed\n");
+			mmc_release_host(host_ctl->mmc);
+			return ret;
+		}
+	}
+#endif
 	/* make sure access user data area */
 	msdc_switch_part(host_ctl, 0);
 
@@ -277,6 +309,17 @@ unsigned int emmc_otp_read(unsigned int blk_offset, void *BufferPtr)
 
 	mmc_wait_for_req(host_ctl->mmc, &msdc_mrq);
 
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	if (is_cmdq_en) {
+		pr_debug("EMMC_OTP turn on cmdq\n");
+		ret = mmc_blk_cmdq_switch(host_ctl->mmc->card, 1);
+		if (ret) {
+			pr_debug("EMMC_OTP turn on cmdq en failed\n");
+			mmc_release_host(host_ctl->mmc);
+			return ret;
+		}
+	}
+#endif
 	mmc_release_host(host_ctl->mmc);
 
 	if (msdc_cmd.error)
@@ -304,6 +347,10 @@ unsigned int emmc_otp_write(unsigned int blk_offset, void *BufferPtr)
 #ifdef MTK_MSDC_USE_CACHE
 	struct mmc_command msdc_sbc;
 #endif
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	int is_cmdq_en;
+	int ret;
+#endif
 
 	/* check parameter */
 	l_addr = emmc_otp_start();
@@ -320,6 +367,20 @@ unsigned int emmc_otp_write(unsigned int blk_offset, void *BufferPtr)
 
 	mmc_claim_host(host_ctl->mmc);
 
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	is_cmdq_en = false;
+	if (host_ctl->mmc->card->ext_csd.cmdq_mode_en) {
+		/* cmdq enabled, turn it off first */
+		pr_debug("EMMC_OTP: cmdq enabled, turn it off\n");
+		is_cmdq_en = true;
+		ret = mmc_blk_cmdq_switch(host_ctl->mmc->card, 0);
+		if (ret) {
+			pr_debug("EMMC_OTP: turn off cmdq en failed\n");
+			mmc_release_host(host_ctl->mmc);
+			return ret;
+		}
+	}
+#endif
 	/* make sure access user data area */
 	msdc_switch_part(host_ctl, 0);
 
@@ -374,6 +435,17 @@ unsigned int emmc_otp_write(unsigned int blk_offset, void *BufferPtr)
 
 	mmc_wait_for_req(host_ctl->mmc, &msdc_mrq);
 
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	if (is_cmdq_en) {
+		pr_debug("EMMC_OTP turn on cmdq\n");
+		ret = mmc_blk_cmdq_switch(host_ctl->mmc->card, 1);
+		if (ret) {
+			pr_debug("EMMC_OTP turn on cmdq en failed\n");
+			mmc_release_host(host_ctl->mmc);
+			return ret;
+		}
+	}
+#endif
 	mmc_release_host(host_ctl->mmc);
 
 	if (msdc_cmd.error)

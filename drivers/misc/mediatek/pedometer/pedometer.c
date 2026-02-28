@@ -1,5 +1,18 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
 
-#include "pedometer_v1.h"
+
+#include "pedometer.h"
 
 struct pedo_context *pedo_context_obj = NULL;
 
@@ -11,8 +24,8 @@ static void pedo_work_func(struct work_struct *work)
 
 	struct pedo_context *cxt = NULL;
 
-	u32 data32[6];
-
+	struct hwm_sensor_data data;
+	static int64_t last_time_stamp;
 	int status;
 	int64_t nt;
 	struct timespec time;
@@ -27,29 +40,22 @@ static void pedo_work_func(struct work_struct *work)
 	time = get_monotonic_coarse();
 	nt = time.tv_sec * 1000000000LL + time.tv_nsec;
 
-	err = cxt->pedo_data.get_data(data32, &status);
+	err = cxt->pedo_data.get_data(&data, &status);
 	if (err) {
 		PEDO_ERR("get pedo data fails!!\n");
 		goto pedo_loop;
 	} else {
-		if ((data32[0] == cxt->drv_data.pedo_data.values[0])
-		    && (data32[1] == cxt->drv_data.pedo_data.values[1])
-		    && (data32[2] == cxt->drv_data.pedo_data.values[2])
-		    && (data32[3] == cxt->drv_data.pedo_data.values[3])) {
-			goto pedo_loop;
-		} else {
-			cxt->drv_data.pedo_data.values[0] = data32[0];
-			cxt->drv_data.pedo_data.values[1] = data32[1];
-			cxt->drv_data.pedo_data.values[2] = data32[2];
-			cxt->drv_data.pedo_data.values[3] = data32[3];
-			/*PEDO_LOG("pedo values %d,%d,%d,%d\n" ,
-			   cxt->drv_data.pedo_data.values[0],
-			   cxt->drv_data.pedo_data.values[1],
-			   cxt->drv_data.pedo_data.values[2],
-			   cxt->drv_data.pedo_data.values[3]); */
-			cxt->drv_data.pedo_data.status = status;
-			cxt->drv_data.pedo_data.time = nt;
-		}
+		cxt->drv_data.pedo_data.values[0] = data.values[0];
+		cxt->drv_data.pedo_data.values[1] = data.values[1];
+		cxt->drv_data.pedo_data.values[2] = data.values[2];
+		cxt->drv_data.pedo_data.values[3] = data.values[3];
+		/*PEDO_LOG("pedo values %d,%d,%d,%d\n" ,
+		   cxt->drv_data.pedo_data.values[0],
+		   cxt->drv_data.pedo_data.values[1],
+		   cxt->drv_data.pedo_data.values[2],
+		   cxt->drv_data.pedo_data.values[3]); */
+		cxt->drv_data.pedo_data.status = status;
+		cxt->drv_data.pedo_data.time = data.time;
 	}
 
 	if (true == cxt->is_first_data_after_enable) {
@@ -65,8 +71,10 @@ static void pedo_work_func(struct work_struct *work)
 	}
 	/*PEDO_LOG("pedo data %d,%d,%d %d\n" ,cxt->drv_data.pedo_data.values[0],
 	   cxt->drv_data.pedo_data.values[1],cxt->drv_data.pedo_data.values[2],cxt->drv_data.pedo_data.values[3]); */
-
-	pedo_data_report(&cxt->drv_data.pedo_data, cxt->drv_data.pedo_data.status);
+	if (last_time_stamp != cxt->drv_data.pedo_data.time) {
+		last_time_stamp = cxt->drv_data.pedo_data.time;
+		pedo_data_report(&cxt->drv_data.pedo_data, cxt->drv_data.pedo_data.status);
+	}
 
 pedo_loop:
 	if (true == cxt->is_polling_run) {
@@ -292,7 +300,7 @@ static ssize_t pedo_store_delay(struct device *dev, struct device_attribute *att
 	}
 
 	ret = kstrtoint(buf, 10, &delay);
-	if (1 != ret) {
+	if (0 != ret) {
 		PEDO_ERR("invalid format!!\n");
 		mutex_unlock(&pedo_context_obj->pedo_op_mutex);
 		return count;
@@ -360,8 +368,13 @@ static ssize_t pedo_show_flush(struct device *dev, struct device_attribute *attr
 static ssize_t pedo_show_devnum(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	const char *devname = NULL;
+	struct input_handle *handle;
 
-	devname = dev_name(&pedo_context_obj->idev->dev);
+	list_for_each_entry(handle, &pedo_context_obj->idev->h_list, d_node)
+		if (strncmp(handle->name, "event", 5) == 0) {
+			devname = handle->name;
+			break;
+		}
 	return snprintf(buf, PAGE_SIZE, "%s\n", devname + 5);
 }
 
@@ -456,7 +469,7 @@ static int pedo_misc_init(struct pedo_context *cxt)
 	int err = 0;
 
 	cxt->mdev.minor = MISC_DYNAMIC_MINOR;
-	cxt->mdev.name = PDR_MISC_DEV_NAME;
+	cxt->mdev.name = PEDO_MISC_DEV_NAME;
 	err = misc_register(&cxt->mdev);
 	if (err)
 		PEDO_ERR("unable to register pedo misc device!!\n");
@@ -480,18 +493,19 @@ static int pedo_input_init(struct pedo_context *cxt)
 	if (NULL == dev)
 		return -ENOMEM;
 
-	dev->name = PDR_INPUTDEV_NAME;
+	dev->name = PEDO_INPUTDEV_NAME;
 
-	input_set_capability(dev, EV_ABS, EVENT_TYPE_PEDO_LENGTH);
-	input_set_capability(dev, EV_ABS, EVENT_TYPE_PEDO_FREQUENCY);
-	input_set_capability(dev, EV_ABS, EVENT_TYPE_PEDO_COUNT);
-	input_set_capability(dev, EV_ABS, EVENT_TYPE_PEDO_DISTANCE);
+	input_set_capability(dev, EV_REL, EVENT_TYPE_PEDO_LENGTH);
+	input_set_capability(dev, EV_REL, EVENT_TYPE_PEDO_FREQUENCY);
+	input_set_capability(dev, EV_REL, EVENT_TYPE_PEDO_COUNT);
+	input_set_capability(dev, EV_REL, EVENT_TYPE_PEDO_DISTANCE);
 	input_set_capability(dev, EV_ABS, EVENT_TYPE_PEDO_STATUS);
-
-	input_set_abs_params(dev, EVENT_TYPE_PEDO_LENGTH, PEDO_VALUE_MIN, PEDO_VALUE_MAX, 0, 0);
+	input_set_capability(dev, EV_REL, EVENT_TYPE_PEDO_TIMESTAMP_HI);
+	input_set_capability(dev, EV_REL, EVENT_TYPE_PEDO_TIMESTAMP_LO);
+	/* input_set_abs_params(dev, EVENT_TYPE_PEDO_LENGTH, PEDO_VALUE_MIN, PEDO_VALUE_MAX, 0, 0);
 	input_set_abs_params(dev, EVENT_TYPE_PEDO_FREQUENCY, PEDO_VALUE_MIN, PEDO_VALUE_MAX, 0, 0);
 	input_set_abs_params(dev, EVENT_TYPE_PEDO_COUNT, PEDO_VALUE_MIN, PEDO_VALUE_MAX, 0, 0);
-	input_set_abs_params(dev, EVENT_TYPE_PEDO_DISTANCE, PEDO_VALUE_MIN, PEDO_VALUE_MAX, 0, 0);
+	input_set_abs_params(dev, EVENT_TYPE_PEDO_DISTANCE, PEDO_VALUE_MIN, PEDO_VALUE_MAX, 0, 0); */
 	input_set_abs_params(dev, EVENT_TYPE_PEDO_STATUS, PEDO_STATUS_MIN, PEDO_STATUS_MAX, 0, 0);
 	input_set_drvdata(dev, cxt);
 
@@ -505,12 +519,12 @@ static int pedo_input_init(struct pedo_context *cxt)
 	return 0;
 }
 
-DEVICE_ATTR(pedoenablenodata, S_IWUSR | S_IRUGO, pedo_show_enable_nodata, pedo_store_enable_nodata);
-DEVICE_ATTR(pedoactive, S_IWUSR | S_IRUGO, pedo_show_active, pedo_store_active);
-DEVICE_ATTR(pedodelay, S_IWUSR | S_IRUGO, pedo_show_delay, pedo_store_delay);
-DEVICE_ATTR(pedobatch, S_IWUSR | S_IRUGO, pedo_show_batch, pedo_store_batch);
-DEVICE_ATTR(pedoflush, S_IWUSR | S_IRUGO, pedo_show_flush, pedo_store_flush);
-DEVICE_ATTR(pedodevnum, S_IWUSR | S_IRUGO, pedo_show_devnum, NULL);
+DEVICE_ATTR(pedoenablenodata,     S_IWUSR | S_IRUGO, pedo_show_enable_nodata, pedo_store_enable_nodata);
+DEVICE_ATTR(pedoactive,     S_IWUSR | S_IRUGO, pedo_show_active, pedo_store_active);
+DEVICE_ATTR(pedodelay,      S_IWUSR | S_IRUGO, pedo_show_delay,  pedo_store_delay);
+DEVICE_ATTR(pedobatch,     S_IWUSR | S_IRUGO, pedo_show_batch, pedo_store_batch);
+DEVICE_ATTR(pedoflush,      S_IWUSR | S_IRUGO, pedo_show_flush,  pedo_store_flush);
+DEVICE_ATTR(pedodevnum,      S_IWUSR | S_IRUGO, pedo_show_devnum,  NULL);
 
 static struct attribute *pedo_attributes[] = {
 	&dev_attr_pedoenablenodata.attr,
@@ -579,14 +593,16 @@ int pedo_data_report(struct hwm_sensor_data *data, int status)
 	struct pedo_context *cxt = NULL;
 	int err = 0;
 
-	PEDO_LOG("pedo_data_report! %d, %d, %d, %d\n", data->values[0],
-		 data->values[1], data->values[2], data->values[3]);
+	/*PEDO_LOG("pedo_data_report! %d, %d, %d, %d\n", data->values[0],
+		 data->values[1], data->values[2], data->values[3]);*/
 	cxt = pedo_context_obj;
-	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_LENGTH, data->values[0]);
-	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_FREQUENCY, data->values[1]);
-	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_COUNT, data->values[2]);
+	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_COUNT, data->values[0]);
+	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_LENGTH, data->values[1]);
+	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_FREQUENCY, data->values[2]);
 	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_DISTANCE, data->values[3]);
 	input_report_abs(cxt->idev, EVENT_TYPE_PEDO_STATUS, status);
+	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_TIMESTAMP_HI, data->time >> 32);
+	input_report_rel(cxt->idev, EVENT_TYPE_PEDO_TIMESTAMP_LO, data->time & 0xFFFFFFFFLL);
 	input_sync(cxt->idev);
 	return err;
 }

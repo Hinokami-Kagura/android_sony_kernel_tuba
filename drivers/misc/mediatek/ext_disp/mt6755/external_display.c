@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/delay.h>
 #include <linux/sched.h>
 #include <linux/semaphore.h>
@@ -35,7 +48,7 @@
 
 #include "disp_session.h"
 #include "disp_lowpower.h"
-#include "display_recorder.h"
+#include "disp_recorder.h"
 #include "extd_info.h"
 
 int ext_disp_use_cmdq;
@@ -532,7 +545,7 @@ static int _convert_disp_input_to_rdma(RDMA_CONFIG_STRUCT *dst, disp_input_confi
 	dst->idx = src->next_buff_idx;
 
 	tmp_fmt = disp_fmt_to_unified_fmt(src->src_fmt);
-	ufmt_disable_X_channel(tmp_fmt, &dst->inputFormat);
+	ufmt_disable_X_channel(tmp_fmt, &dst->inputFormat, NULL);
 
 	Bpp = UFMT_GET_Bpp(dst->inputFormat);
 	mva_offset = (src->src_offset_x + src->src_offset_y * src->src_pitch) * Bpp;
@@ -586,11 +599,12 @@ static int _convert_disp_input_to_ovl(OVL_CONFIG_STRUCT *dst, disp_input_config 
 
 	tmp_fmt = disp_fmt_to_unified_fmt(src->src_fmt);
 	/* display don't support X channel, like XRGB8888
-	 * we need to disable alpha channel*/
-	ufmt_disable_X_channel(tmp_fmt, &dst->fmt);
+	 * we need to enable const_bld*/
+	ufmt_disable_X_channel(tmp_fmt, &dst->fmt, &dst->const_bld);
+#if 0
 	if (tmp_fmt != dst->fmt)
 		force_disable_alpha = 1;
-
+#endif
 	Bpp = UFMT_GET_Bpp(dst->fmt);
 
 	dst->addr = (unsigned long)src->src_phy_addr;
@@ -638,7 +652,7 @@ static int _ext_disp_trigger(int blocking, void *callback, unsigned int userdata
 {
 	bool reg_flush = false;
 
-	/*EXT_DISP_FUNC();*/
+/*	EXT_DISP_FUNC();*/
 
 	if (_should_wait_path_idle())
 		dpmgr_wait_event_timeout(pgc->dpmgr_handle, DISP_PATH_EVENT_FRAME_DONE, HZ / 2);
@@ -973,7 +987,7 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata, unsign
 {
 	int ret = 0;
 
-	/*EXT_DISP_FUNC();*/
+/*	EXT_DISP_FUNC(); */
 
 	if (pgc->state == EXTD_DEINIT || pgc->state == EXTD_SUSPEND || pgc->need_trigger_overlay < 1) {
 		EXT_DISP_LOG("trigger ext display is already slept\n");

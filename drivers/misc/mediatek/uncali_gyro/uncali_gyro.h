@@ -1,3 +1,15 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
 
 #ifndef __UNCALI_GYRO_H__
 #define __UNCALI_GYRO_H__
@@ -11,19 +23,31 @@
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/hwmsensor.h>
-#include <linux/earlysuspend.h>
-#include <linux/hwmsen_dev.h>
 
-/* #define DEBUG */
+#include <linux/i2c.h>
+#include <linux/irq.h>
+#include <linux/uaccess.h>
+#include <linux/delay.h>
+#include <linux/kobject.h>
+#include <linux/atomic.h>
+#include <linux/ioctl.h>
+
+#include <batch.h>
+#include <sensors_io.h>
+#include <hwmsen_helper.h>
+#include <hwmsensor.h>
+#include <hwmsen_dev.h>
+
+
+#define DEBUG
 
 #ifdef DEBUG
-#define UNCALI_GYRO_TAG					"<UNCALI_GYRO> "
-#define UNCALI_GYRO_FUN(f)				pr_debug(UNCALI_GYRO_TAG"%s\n", __func__)
+#define UNCALI_GYRO_TAG						"<UNCALI_GYRO> "
+#define UNCALI_GYRO_FUN(f)					pr_debug(UNCALI_GYRO_TAG"%s\n", __func__)
 #define UNCALI_GYRO_ERR(fmt, args...)		pr_err(UNCALI_GYRO_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
 #define UNCALI_GYRO_LOG(fmt, args...)		pr_debug(UNCALI_GYRO_TAG fmt, ##args)
-#define UNCALI_GYRO_VER(fmt, args...)	pr_debug(UNCALI_GYRO_TAG"%s: "fmt, __func__, ##args) /* ((void)0) */
-#define UNCALI_GYRO_DBGMSG pr_debug("%s, %d\n", __func__, __LINE__)
+#define UNCALI_GYRO_VER(fmt, args...)		pr_debug(UNCALI_GYRO_TAG"%s: "fmt, __func__, ##args) /* ((void)0) */
+#define UNCALI_GYRO_DBGMSG					pr_debug("%s, %d\n", __func__, __LINE__)
 #else
 #define UNCALI_GYRO_TAG					"<UNCALI_GYRO> "
 #define UNCALI_GYRO_FUN(f)
@@ -44,7 +68,9 @@
 #define EVENT_TYPE_UNCALI_GYRO_X_BIAS			ABS_RX
 #define EVENT_TYPE_UNCALI_GYRO_Y_BIAS			ABS_RY
 #define EVENT_TYPE_UNCALI_GYRO_Z_BIAS			ABS_RZ
-#define EVENT_TYPE_UNCALI_GYRO_STATUS			REL_X
+#define EVENT_TYPE_UNCALI_GYRO_UPDATE           REL_X
+#define EVENT_TYPE_UNCALI_GYRO_TIMESTAMP_HI		REL_HWHEEL
+#define EVENT_TYPE_UNCALI_GYRO_TIMESTAMP_LO		REL_DIAL
 
 #define UNCALI_GYRO_VALUE_MAX (32767)
 #define UNCALI_GYRO_VALUE_MIN (-32768)
@@ -79,7 +105,7 @@ struct uncali_gyro_init_info {
 };
 
 struct uncali_gyro_data {
-	hwm_sensor_data uncali_gyro_data;
+	struct hwm_sensor_data uncali_gyro_data;
 	int data_updata;
 };
 
@@ -118,7 +144,7 @@ struct uncali_gyro_context {
 
 /* for auto detect */
 extern int uncali_gyro_driver_add(struct uncali_gyro_init_info *obj);
-extern int uncali_gyro_data_report(int *data, int status);
+extern int uncali_gyro_data_report(int *data, int status, int64_t nt);
 extern int uncali_gyro_register_control_path(struct uncali_gyro_control_path *ctl);
 extern int uncali_gyro_register_data_path(struct uncali_gyro_data_path *data);
 

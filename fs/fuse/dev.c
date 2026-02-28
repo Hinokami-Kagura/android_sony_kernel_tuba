@@ -7,14 +7,16 @@
 */
 
 #include "fuse_i.h"
+//[CEI comment] fuse: Add support for passthrough read/write
 #include "fuse_passthrough.h"
-#include "fuse.h"
+#include "mt_fuse.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/poll.h>
 #include <linux/uio.h>
 #include <linux/miscdevice.h>
+#include <linux/namei.h>
 #include <linux/pagemap.h>
 #include <linux/file.h>
 #include <linux/slab.h>
@@ -524,6 +526,7 @@ EXPORT_SYMBOL_GPL(fuse_request_send_ex);
 
 void fuse_request_send(struct fuse_conn *fc, struct fuse_req *req)
 {
+	//[CEI comment] fuse: Add support for passthrough read/write
 	int ret;
 	fuse_request_send_ex(fc, req, 0);
 	ret = req->out.h.error;
@@ -1896,8 +1899,13 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 	spin_unlock(&fc->lock);
 
 	err = copy_out_args(cs, &req->out, nbytes);
+	if (req->in.h.opcode == FUSE_CANONICAL_PATH && req->out.h.error == 0) {
+		req->out.h.error = kern_path((char *)req->out.args[0].value, 0,
+							req->canonical_path);
+	}
 	fuse_copy_finish(cs);
 
+	//[CEI comment] fuse: Add support for passthrough read/write
 	fuse_setup_passthrough(fc, req);
 	spin_lock(&fc->lock);
 	req->locked = 0;

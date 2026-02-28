@@ -20,7 +20,6 @@
  */
 
 #include <linux/input.h>
-
 #include "include/gt1x_tpd_common.h"
 #include "gt1x_config.h"
 
@@ -991,7 +990,7 @@ void gt1x_power_reset(void)
 	s32 i = 0;
 	s32 ret = 0;
 
-	if (is_resetting)
+	if (is_resetting || update_info.status)
 		return;
 	GTP_INFO("force_reset_guitar");
 	is_resetting = 1;
@@ -1051,10 +1050,12 @@ s32 gt1x_request_event_handler(void)
 	case GTP_RQST_MAIN_CLOCK:
 		GTP_INFO("Request main clock.");
 		break;
+#if 0
 #ifdef CONFIG_GTP_HOTKNOT
 	case GTP_RQST_HOTKNOT_CODE:
 		GTP_INFO("Request HotKnot Code.");
 		break;
+#endif
 #endif
 	default:
 		break;
@@ -1780,3 +1781,4 @@ void gt1x_deinit(void)
 	if (gt1x_workqueue)
 		destroy_workqueue(gt1x_workqueue);
 }
+MODULE_LICENSE("GPL");

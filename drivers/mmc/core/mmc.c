@@ -352,6 +352,9 @@ static void mmc_manage_gp_partitions(struct mmc_card *card, u8 *ext_csd)
 	}
 }
 
+/* Minimum partition switch timeout in milliseconds */
+#define MMC_MIN_PART_SWITCH_TIME	300
+
 /*
  * Decode extended CSD.
  */
@@ -407,9 +410,16 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		u8 sa_shift = ext_csd[EXT_CSD_S_A_TIMEOUT];
 		u8 sn_shift = ext_csd[EXT_CSD_SLEEP_NOTIFICATION_TIME];
 		card->ext_csd.part_config = ext_csd[EXT_CSD_PART_CONFIG];
-
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 		/* EXT_CSD value is in units of 10ms, but we store in ms */
+		card->ext_csd.part_time = 40 * ext_csd[EXT_CSD_PART_SWITCH_TIME];
+#else
 		card->ext_csd.part_time = 10 * ext_csd[EXT_CSD_PART_SWITCH_TIME];
+#endif
+		/* Some eMMC set the value too low so set a minimum */
+		if (card->ext_csd.part_time &&
+		    card->ext_csd.part_time < MMC_MIN_PART_SWITCH_TIME)
+			card->ext_csd.part_time = MMC_MIN_PART_SWITCH_TIME;
 
 		/* Sleep / awake timeout in 100ns units */
 		if (sa_shift > 0 && sa_shift <= 0x17)
@@ -419,7 +429,7 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		/* Sleep notification time in 10us units */
 		if (sn_shift > 0 && sn_shift <= 0x17)
 			card->ext_csd.sleep_notification_time =
-				1 << ext_csd[EXT_CSD_SLEEP_NOTIFICATION_TIME];
+					1 << ext_csd[EXT_CSD_SLEEP_NOTIFICATION_TIME];
 
 		card->ext_csd.erase_group_def =
 			ext_csd[EXT_CSD_ERASE_GROUP_DEF];
@@ -1691,24 +1701,22 @@ static int mmc_sleep(struct mmc_host *host)
 	struct mmc_command cmd = {0};
 	struct mmc_card *card = host->card;
 	unsigned int timeout_ms = DIV_ROUND_UP(card->ext_csd.sa_timeout, 10000);
-	unsigned int sn_timeout_ms =
-		DIV_ROUND_UP(card->ext_csd.sleep_notification_time, 100);
+	unsigned int sn_timeout_ms = DIV_ROUND_UP(card->ext_csd.sleep_notification_time, 100);
 	int err;
 
 	/* Re-tuning can't be done once the card is deselected */
 	mmc_retune_hold(host);
 
 	/*
-	 * Send sleep_notification if eMMC revision is after v5.0
+	 * Send sleep_notification if eMMC reversion after v5.0
 	 */
 	if (card->ext_csd.rev >= 7 && !(card->quirks & MMC_QUIRK_DISABLE_SNO)) {
 		err = __mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				EXT_CSD_POWER_OFF_NOTIFICATION,
-				EXT_CSD_SLEEP_NOTIFICATION,
-				sn_timeout_ms, true, false, false);
+				EXT_CSD_SLEEP_NOTIFICATION, sn_timeout_ms, true, false, false);
 		if (err)
 			pr_err("%s: Sleep Notification timed out %u\n",
-				mmc_hostname(card->host), sn_timeout_ms);
+				       mmc_hostname(card->host), sn_timeout_ms);
 	}
 
 	err = mmc_deselect_cards(host);
@@ -2151,13 +2159,9 @@ int mmc_attach_mmc(struct mmc_host *host)
 	atomic_set(&host->cq_rw, false);
 	atomic_set(&host->cq_w, false);
 	atomic_set(&host->cq_wait_rdy, 0);
+	atomic_set(&host->cq_rdy_cnt, 0);
 	host->wp_error = 0;
-	host->cq_write = false;
-	host->cq_write_status = false;
 	host->task_id_index = 0;
-	host->dbg_host_cnt = 0;
-	host->dbg_host_claim_cnt = 0;
-	host->polling_times = 0;
 	host->is_data_dma = 0;
 	host->cur_rw_task = 99;
 	host->cmdq_support_changed = 1;
@@ -2169,8 +2173,7 @@ int mmc_attach_mmc(struct mmc_host *host)
 	for (i = 0; i < 32; i++)
 		host->data_mrq_queued[i] = false;
 
-	host->cmdq_thread_cmd = kthread_run(mmc_run_queue_thread_cmd, host, "exe_cq_cmd");
-	host->cmdq_thread_dat = kthread_run(mmc_run_queue_thread_dat, host, "exe_cq_dat");
+	host->cmdq_thread = kthread_run(mmc_run_queue_thread, host, "exe_cq");
 #endif
 	err = mmc_add_card(host->card);
 	mmc_claim_host(host);

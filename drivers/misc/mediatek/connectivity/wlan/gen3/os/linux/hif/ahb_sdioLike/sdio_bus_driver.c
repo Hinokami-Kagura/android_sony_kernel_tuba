@@ -1,3 +1,17 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software: you can redistribute it and/or modify it under the terms of the
+* GNU General Public License version 2 as published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+* without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See the GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License along with this program.
+* If not, see <http://www.gnu.org/licenses/>.
+*/
+
 /*****************************************************************************
  *============================================================================
  *                               HISTORY
@@ -28,10 +42,10 @@
     --------    ----------      ----------------------------------------------
 */
 #include <linux/kernel.h>
-#include "sdio.h"
 #include <asm/io.h>
 #include "debug.h"
 #include "gl_os.h"
+#include "sdio.h"
 /* ========================== SDIO Private Routines ============================= */
 
 /**
@@ -161,8 +175,14 @@ UINT_32 sdio_cr_readl(volatile unsigned int *HifBaseAddr, unsigned int addr)
 	info.field.addr = addr;
 	info.field.count = 4;
 
+	my_sdio_disable(HifLock);
+	__disable_irq();
+
 	writel(info.word, (volatile UINT_32 *)(SDIO_GEN3_CMD_SETUP + (UINT_8 *)HifBaseAddr));
 	value = readl((volatile UINT_32 *)(SDIO_GEN3_CMD53_DATA + (UINT_8 *)HifBaseAddr));
+
+	__enable_irq();
+	my_sdio_enable(HifLock);
 
 	return value;
 }
@@ -196,8 +216,14 @@ void sdio_cr_writel(UINT_32 b, volatile unsigned int *HifBaseAddr, unsigned int 
 	info.field.addr = addr;
 	info.field.count = 4;
 
+	my_sdio_disable(HifLock);
+	__disable_irq();
+
 	writel(info.word, (volatile UINT_32 *)(SDIO_GEN3_CMD_SETUP + (UINT_8 *)HifBaseAddr));
 	writel(b, (volatile UINT_32 *)(SDIO_GEN3_CMD53_DATA + (UINT_8 *)HifBaseAddr));
+
+	__enable_irq();
+	my_sdio_enable(HifLock);
 
 }
 
@@ -218,10 +244,12 @@ unsigned char ahb_sdio_f0_readb(struct sdio_func *func, unsigned int addr,
     info.field.func_num = 0;
     info.field.addr = addr;
 
+	my_sdio_disable(HifLock);
 	__disable_irq();
 	writel(info.word, (volatile UINT_32 *)(SDIO_GEN3_CMD_SETUP + *g_pHifRegBaseAddr));
 	val = readl((volatile UINT_32 *)(SDIO_GEN3_CMD52_DATA + *g_pHifRegBaseAddr));
 	__enable_irq();
+	my_sdio_enable(HifLock);
 
 	return val;
 }
@@ -256,10 +284,12 @@ void ahb_sdio_f0_writeb(struct sdio_func *func, unsigned char b, unsigned int ad
 	info.field.addr = addr;
 	info.field.data = b;
 
+	my_sdio_disable(HifLock);
 	__disable_irq();
 	writel(info.word, (volatile UINT_32 *)(SDIO_GEN3_CMD_SETUP + *g_pHifRegBaseAddr));
 	writel(b, (volatile UINT_32 *)(SDIO_GEN3_CMD52_DATA + *g_pHifRegBaseAddr));
 	__enable_irq();
+	my_sdio_enable(HifLock);
 
 }
 

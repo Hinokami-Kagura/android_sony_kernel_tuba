@@ -1,16 +1,15 @@
-/******************************************************************************
-* mtk_nand.c - MTK NAND Flash Device Driver
+/*
+ * Copyright (C) 2015 MediaTek Inc.
  *
-* Copyright 2009-2012 MediaTek Co.,Ltd.
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
-* DESCRIPTION:
-*	This file provid the other drivers nand relative functions
- *
-* modification history
-* ----------------------------------------
-* v3.0, 11 Feb 2010, mtk
-* ----------------------------------------
-******************************************************************************/
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
@@ -57,13 +56,13 @@
 /* #include <mach/mt_clkmgr.h> */
 /* #include <mach/mtk_nand.h> */
 /* #include <mach/bmt.h> */
-#include <mtk_nand.h>
-#include <bmt.h>
+#include "mtk_nand.h"
+#include "bmt.h"
 /* #include <mach/mt_irq.h> */
 /* #include "partition.h" */
 /* #include <asm/system.h> */
 /* #include <mach/partition_define.h> */
-#include <partition_define.h>
+#include "partition_define.h"
 /* #include <mach/mt_boot.h> */
 #include <mt-plat/mt_boot.h>
 /* #include "../../../../../../source/kernel/drivers/aee/ipanic/ipanic.h" */
@@ -74,7 +73,7 @@
 #include <mach/power_loss_test.h>
 #endif
 /* #include <mach/nand_device_define.h> */
-#include <nand_device_define.h>
+#include "nand_device_define.h"
 
 #ifndef CONFIG_MTK_LEGACY
 #include <linux/clk.h>
@@ -170,9 +169,17 @@ static const flashdev_info_t gen_FlashTable_p[] = {
 	 0xC03222, 0x101, 80, VEND_HYNIX, 1024, "H27UBG8T2CTR", 0,
 	 {HYNIX_8K, {0xFF, 0xFF, 0xFF, 7, 0xFF, 0, 1, RTYPE_HYNIX, {0XFF, 0xFF}, {0XFF, 0xFF} },
 	  {RAND_TYPE_SAMSUNG, {0x2D2D, 1, 1, 1, 1, 1} } } },
-	{{0x98, 0xDE, 0x94, 0x93, 0x76, 0x00}, 5, 5, IO_8BIT, 8192, 4096, 16384, 1280, 0x10401011,
+	{{0x98, 0xDE, 0x94, 0x93, 0x76, 0x50}, 6, 5, IO_8BIT, 8192, 4096, 16384, 1280, 0x10401011,
 	 0xC03222, 0x101, 80, VEND_TOSHIBA, 1024, "TC58TEG6DDKTA00", 0,
 	 {SANDISK_16K, {0xEF, 0xEE, 0xFF, 7, 0xFF, 7, 0, RTYPE_TOSHIBA, {0x80, 0x00}, {0x80, 0x01} },
+	  {RAND_TYPE_SAMSUNG, {0x2D2D, 1, 1, 1, 1, 1} } } },
+	{{0x98, 0xDE, 0x94, 0x93, 0x76, 0x51}, 6, 5, IO_8BIT, 8192, 4096, 16384, 1280, 0x10401011,
+	 0xC03222, 0x101, 80, VEND_TOSHIBA, 1024, "TC58TEG6DDLTA00", 0,
+	 {SANDISK_16K, {0xEF, 0xEE, 0xFF, 7, 0xFF, 7, 0, RTYPE_TOSHIBA_15NM, {0x80, 0x00}, {0x80, 0x01} },
+	  {RAND_TYPE_SAMSUNG, {0x2D2D, 1, 1, 1, 1, 1} } } },
+	{{0x98, 0x3A, 0x94, 0x93, 0x76, 0x51}, 6, 5, IO_8BIT, 16384, 4096, 16384, 1280, 0x10401011,
+	 0xC03222, 0x101, 80, VEND_TOSHIBA, 1024, "TC58TEG7DDLTA0D", 0,
+	 {SANDISK_16K, {0xEF, 0xEE, 0xFF, 7, 0xFF, 7, 0, RTYPE_TOSHIBA_15NM, {0x80, 0x00}, {0x80, 0x01} },
 	  {RAND_TYPE_SAMSUNG, {0x2D2D, 1, 1, 1, 1, 1} } } },
 };
 
@@ -188,17 +195,19 @@ static unsigned int flash_number = sizeof(gen_FlashTable_p) / sizeof(flashdev_in
 } while (0)
 
 #ifndef CONFIG_MTK_LEGACY
-struct clk *nfi_clock = NULL;
-struct clk *nfi_ecc_clock = NULL;
-struct clk *nfi_bclk_clock = NULL;
-struct clk *onfi_sel_clock = NULL;
-struct clk *onfi_26m_clock = NULL;
-
-struct clk *syspll2_d2_clock = NULL;
-struct clk *syspll_d7_clock = NULL;
-struct clk *infra_nfi_sel_clock = NULL;
-struct clk *axi_sel_clock = NULL;
-struct clk *onfi_d2_clock = NULL;
+struct clk *nfi_hclk = NULL;
+struct clk *nfiecc_bclk = NULL;
+struct clk *nfi_bclk = NULL;
+struct clk *onfi_sel_clk = NULL;
+struct clk *onfi_26m_clk = NULL;
+struct clk *onfi_mode5 = NULL;
+struct clk *onfi_mode4 = NULL;
+struct clk *nfi_bclk_sel = NULL;
+struct clk *nfi_ahb_clk = NULL;
+struct clk *nfi_1xpad_clk = NULL;
+struct clk *nfi_ecc_pclk = NULL;
+struct clk *nfi_pclk = NULL;
+struct clk *onfi_pad_clk = NULL;
 
 struct regulator *mtk_nand_regulator = NULL;
 #endif
@@ -770,18 +779,26 @@ void nand_unprepare_clock(void)
 void nand_prepare_clock(void)
 {
 	#if !defined(CONFIG_MTK_LEGACY)
-	clk_prepare(nfi_clock);
-	clk_prepare(nfi_ecc_clock);
-	clk_prepare(nfi_bclk_clock);
+	clk_prepare(nfi_hclk);
+	clk_prepare(nfiecc_bclk);
+	clk_prepare(nfi_bclk);
+	if (mtk_nfi_dev_comp->chip_ver == 2) {
+		clk_prepare(nfi_pclk);
+		clk_prepare(nfi_ecc_pclk);
+	}
 	#endif
 }
 
 void nand_unprepare_clock(void)
 {
 	#if !defined(CONFIG_MTK_LEGACY)
-	clk_unprepare(nfi_clock);
-	clk_unprepare(nfi_ecc_clock);
-	clk_unprepare(nfi_bclk_clock);
+	clk_unprepare(nfi_hclk);
+	clk_unprepare(nfiecc_bclk);
+	clk_unprepare(nfi_bclk);
+	if (mtk_nfi_dev_comp->chip_ver == 2) {
+		clk_unprepare(nfi_pclk);
+		clk_unprepare(nfi_ecc_pclk);
+	}
 	#endif
 }
 
@@ -807,9 +824,13 @@ void nand_enable_clock(void)
 			mtk_nfi_dev_comp->chip_ver);
 	}
 #else
-	clk_enable(nfi_clock);
-	clk_enable(nfi_ecc_clock);
-	clk_enable(nfi_bclk_clock);
+	clk_enable(nfi_hclk);
+	clk_enable(nfiecc_bclk);
+	clk_enable(nfi_bclk);
+	if (mtk_nfi_dev_comp->chip_ver == 2) {
+		clk_enable(nfi_pclk);
+		clk_enable(nfi_ecc_pclk);
+	}
 #endif
 }
 
@@ -835,9 +856,13 @@ void nand_disable_clock(void)
 			mtk_nfi_dev_comp->chip_ver);
 	}
 #else
-	clk_disable(nfi_clock);
-	clk_disable(nfi_ecc_clock);
-	clk_disable(nfi_bclk_clock);
+	clk_disable(nfi_hclk);
+	clk_disable(nfiecc_bclk);
+	clk_disable(nfi_bclk);
+	if (mtk_nfi_dev_comp->chip_ver == 2) {
+		clk_disable(nfi_pclk);
+		clk_disable(nfi_ecc_pclk);
+	}
 #endif
 }
 #endif
@@ -1342,7 +1367,7 @@ static int mtk_nand_interface_config(struct mtd_info *mtd)
 #if defined(CONFIG_MTK_LEGACY)
 		NFI_SET_REG32(PERI_NFI_CLK_SOURCE_SEL, NFI_PAD_1X_CLOCK);
 #else
-		clk_set_parent(infra_nfi_sel_clock, onfi_d2_clock);
+		clk_set_parent(nfi_bclk_sel, nfi_1xpad_clk);
 #endif
 		mb();
 
@@ -1350,9 +1375,9 @@ static int mtk_nand_interface_config(struct mtd_info *mtd)
 		clkmux_sel(MT_MUX_ONFI, g_iNFI2X_CLKSRC, "NFI");
 #else
 		if (g_iNFI2X_CLKSRC == 1)
-			clk_set_parent(onfi_sel_clock, syspll2_d2_clock);
+			clk_set_parent(onfi_sel_clk, onfi_mode5);
 		else if (g_iNFI2X_CLKSRC == 2)
-			clk_set_parent(onfi_sel_clock, syspll_d7_clock);
+			clk_set_parent(onfi_sel_clk, onfi_mode4);
 #endif
 		mb();
 #endif
@@ -1385,7 +1410,7 @@ static int mtk_nand_interface_config(struct mtd_info *mtd)
 #if defined(CONFIG_MTK_LEGACY)
 			clkmux_sel(MT_MUX_ONFI, MAINPLL, "NFI");	/* 182M */
 #else
-			clk_set_parent(onfi_sel_clock, syspll2_d2_clock);
+			clk_set_parent(onfi_sel_clk, onfi_mode5);
 #endif
 #endif
 			NFI_SET_REG32(NFI_DEBUG_CON1_REG16, NFI_BYPASS);
@@ -1394,7 +1419,7 @@ static int mtk_nand_interface_config(struct mtd_info *mtd)
 #if defined(CONFIG_MTK_LEGACY)
 			NFI_CLN_REG32(PERI_NFI_CLK_SOURCE_SEL, NFI_PAD_1X_CLOCK);
 #else
-			clk_set_parent(infra_nfi_sel_clock, axi_sel_clock);
+			clk_set_parent(nfi_bclk_sel, nfi_ahb_clk);
 #endif
 			/* DRV_WriteReg32(PERICFG_BASE+0x5C, 0x1); // setting AHB clock */
 			/* MSG(INIT, "AHB Clock(0x%x)\n",DRV_Reg32(PERICFG_BASE+0x5C)); */
@@ -3143,6 +3168,20 @@ const u8 data_tbl[8][5] = {
 	{0x00, 0x00, 0x00, 0x00, 0x00}
 };
 
+const u8 data_tbl_15nm[11][5] = {
+	{0x00, 0x00, 0x00, 0x00, 0x00},
+	{0x02, 0x04, 0x02, 0x00, 0x00},
+	{0x7C, 0x00, 0x7C, 0x7C, 0x00},
+	{0x7A, 0x00, 0x7A, 0x7A, 0x00},
+	{0x78, 0x02, 0x78, 0x7A, 0x00},
+	{0x7E, 0x04, 0x7E, 0x7A, 0x00},
+	{0x76, 0x04, 0x76, 0x78, 0x00},
+	{0x04, 0x04, 0x04, 0x76, 0x00},
+	{0x06, 0x0A, 0x06, 0x02, 0x00},
+	{0x74, 0x7C, 0x74, 0x76, 0x00},
+	{0x00, 0x00, 0x00, 0x00, 0x00}
+};
+
 static void mtk_nand_modeentry_rrtry(void)
 {
 	mtk_nand_reset();
@@ -3166,6 +3205,22 @@ static void mtk_nand_rren_rrtry(bool needB3)
 	mtk_nand_set_command(0x26);
 	mtk_nand_set_command(0x5D);
 
+	mtk_nand_status_ready(STA_NFI_OP_MASK);
+}
+
+
+static void mtk_nand_rren_15nm_rrtry(bool flag)
+{
+	mtk_nand_reset();
+
+	mtk_nand_set_mode(CNFG_OP_CUST);
+
+	if (flag)
+		mtk_nand_set_command(0x26);
+	else
+		mtk_nand_set_command(0xCD);
+
+	mtk_nand_set_command(0x5D);
 	mtk_nand_status_ready(STA_NFI_OP_MASK);
 }
 
@@ -3229,6 +3284,36 @@ static void mtk_nand_toshiba_rrtry(struct mtd_info *mtd, flashdev_info_t devicei
 	DRV_WriteReg32(NFI_ACCCON_REG32, acccon);
 }
 
+static void mtk_nand_toshiba_15nm_rrtry(struct mtd_info *mtd, flashdev_info_t deviceinfo,
+				u32 retryCount, bool defValue)
+{
+	u32 acccon;
+	u8 add_reg[6] = { 0x04, 0x05, 0x06, 0x07, 0x0D };
+	u8 cnt = 0;
+
+	pr_debug("Toshiba 15nm retryCount:%d\n", retryCount);
+
+	acccon = DRV_Reg32(NFI_ACCCON_REG32);
+	DRV_WriteReg32(NFI_ACCCON_REG32, 0x31C08669); /* to fit read retry timing */
+
+	if (0 == retryCount)
+		mtk_nand_modeentry_rrtry();
+
+	for (cnt = 0; cnt < 5; cnt++)
+		mtk_nand_sprmset_rrtry(add_reg[cnt], data_tbl_15nm[retryCount][cnt]);
+
+	if (10 == retryCount) {	/* to exit */
+		mtk_nand_device_reset();
+		mtk_nand_reset();
+	}	else {
+		if (0 == retryCount)
+			mtk_nand_rren_15nm_rrtry(TRUE);
+		else
+			mtk_nand_rren_15nm_rrtry(FALSE);
+	}
+
+	DRV_WriteReg32(NFI_ACCCON_REG32, acccon);
+}
 #endif
 static void mtk_nand_micron_rrtry(struct mtd_info *mtd, flashdev_info_t deviceinfo, u32 feature,
 				  bool defValue)
@@ -3699,6 +3784,7 @@ static rrtryFunctionType rtyFuncArray[] = {
 	mtk_nand_sandisk_rrtry,
 	mtk_nand_sandisk_19nm_rrtry,
 	mtk_nand_toshiba_rrtry,
+	mtk_nand_toshiba_15nm_rrtry,
 	mtk_nand_hynix_rrtry,
 	mtk_nand_hynix_16nm_rrtry
 };
@@ -5424,7 +5510,7 @@ int mtk_nand_block_markbad_hw(struct mtd_info *mtd, loff_t offset)
 	return ret;
 }
 
-static int mtk_nand_block_markbad(struct mtd_info *mtd, loff_t offset)
+static int mtk_nand_block_markbad(struct mtd_info *mtd, loff_t offset, const uint8_t *buf)
 {
 	struct nand_chip *chip = mtd->priv;
 	u32 block = (u32) (offset >> chip->phys_erase_shift);
@@ -6378,35 +6464,41 @@ static int mtk_nand_probe(struct platform_device *pdev)
 
 #if !defined(CONFIG_MTK_LEGACY)
 	if (mtk_nfi_dev_comp->chip_ver == 1) {
-		nfi_clock = devm_clk_get(&pdev->dev, "nfi_ck");
-		BUG_ON(IS_ERR(nfi_clock));
-		nfi_ecc_clock = devm_clk_get(&pdev->dev, "nfi_ecc_ck");
-		BUG_ON(IS_ERR(nfi_ecc_clock));
-		nfi_bclk_clock = devm_clk_get(&pdev->dev, "nfi_pad_ck");
-		BUG_ON(IS_ERR(nfi_bclk_clock));
+		nfi_hclk = devm_clk_get(&pdev->dev, "nfi_ck");
+		BUG_ON(IS_ERR(nfi_hclk));
+		nfiecc_bclk = devm_clk_get(&pdev->dev, "nfi_ecc_ck");
+		BUG_ON(IS_ERR(nfiecc_bclk));
+		nfi_bclk = devm_clk_get(&pdev->dev, "nfi_pad_ck");
+		BUG_ON(IS_ERR(nfi_bclk));
 		mtk_nand_regulator = devm_regulator_get(&pdev->dev, "vmch");
 		BUG_ON(IS_ERR(mtk_nand_regulator));
 	} else if (mtk_nfi_dev_comp->chip_ver == 2) {
-		nfi_clock = devm_clk_get(&pdev->dev, "infra_nfi");
-		BUG_ON(IS_ERR(nfi_clock));
-		nfi_ecc_clock = devm_clk_get(&pdev->dev, "infra_nfi_ecc");
-		BUG_ON(IS_ERR(nfi_ecc_clock));
-		nfi_bclk_clock = devm_clk_get(&pdev->dev, "infra_nfi_bclk");
-		BUG_ON(IS_ERR(nfi_bclk_clock));
-		onfi_sel_clock = devm_clk_get(&pdev->dev, "onfi_sel");
-		BUG_ON(IS_ERR(onfi_sel_clock));
-		onfi_26m_clock = devm_clk_get(&pdev->dev, "onfi_clk26m");
-		BUG_ON(IS_ERR(onfi_26m_clock));
-		syspll2_d2_clock = devm_clk_get(&pdev->dev, "syspll2_d2");
-		BUG_ON(IS_ERR(syspll2_d2_clock));
-		syspll_d7_clock = devm_clk_get(&pdev->dev, "syspll_d7");
-		BUG_ON(IS_ERR(syspll_d7_clock));
-		infra_nfi_sel_clock = devm_clk_get(&pdev->dev, "infra_nfi_sel");
-		BUG_ON(IS_ERR(infra_nfi_sel_clock));
-		axi_sel_clock = devm_clk_get(&pdev->dev, "axi_sel");
-		BUG_ON(IS_ERR(axi_sel_clock));
-		onfi_d2_clock = devm_clk_get(&pdev->dev, "onfi_d2");
-		BUG_ON(IS_ERR(onfi_d2_clock));
+		nfi_hclk = devm_clk_get(&pdev->dev, "nfi_hclk");
+		BUG_ON(IS_ERR(nfi_hclk));
+		nfiecc_bclk = devm_clk_get(&pdev->dev, "nfiecc_bclk");
+		BUG_ON(IS_ERR(nfiecc_bclk));
+		nfi_bclk = devm_clk_get(&pdev->dev, "nfi_bclk");
+		BUG_ON(IS_ERR(nfi_bclk));
+		onfi_sel_clk = devm_clk_get(&pdev->dev, "onfi_sel");
+		BUG_ON(IS_ERR(onfi_sel_clk));
+		onfi_26m_clk = devm_clk_get(&pdev->dev, "onfi_clk26m");
+		BUG_ON(IS_ERR(onfi_26m_clk));
+		onfi_mode5 = devm_clk_get(&pdev->dev, "onfi_mode5");
+		BUG_ON(IS_ERR(onfi_mode5));
+		onfi_mode4 = devm_clk_get(&pdev->dev, "onfi_mode4");
+		BUG_ON(IS_ERR(onfi_mode4));
+		nfi_bclk_sel = devm_clk_get(&pdev->dev, "nfi_bclk_sel");
+		BUG_ON(IS_ERR(nfi_bclk_sel));
+		nfi_ahb_clk = devm_clk_get(&pdev->dev, "nfi_ahb_clk");
+		BUG_ON(IS_ERR(nfi_ahb_clk));
+		nfi_1xpad_clk = devm_clk_get(&pdev->dev, "nfi_1xpad_clk");
+		BUG_ON(IS_ERR(nfi_1xpad_clk));
+		nfi_ecc_pclk = devm_clk_get(&pdev->dev, "nfiecc_pclk");
+		BUG_ON(IS_ERR(nfi_ecc_pclk));
+		nfi_pclk = devm_clk_get(&pdev->dev, "nfi_pclk");
+		BUG_ON(IS_ERR(nfi_pclk));
+		onfi_pad_clk = devm_clk_get(&pdev->dev, "onfi_pad_clk");
+		BUG_ON(IS_ERR(onfi_pad_clk));
 		mtk_nand_regulator = devm_regulator_get(&pdev->dev, "vmch");
 		BUG_ON(IS_ERR(mtk_nand_regulator));
 	}
@@ -7090,17 +7182,17 @@ static int mtk_nand_resume(struct platform_device *pdev)
 			/* DRV_WriteReg32(PERICFG_BASE+0x5C, 0x0); */
 			NFI_SET_REG32(PERI_NFI_CLK_SOURCE_SEL, NFI_PAD_1X_CLOCK);
 #else
-			clk_set_parent(infra_nfi_sel_clock, onfi_d2_clock);
+			clk_set_parent(nfi_bclk_sel, nfi_1xpad_clk);
 #endif
 #if defined(CONFIG_MTK_LEGACY)
 			clkmux_sel(MT_MUX_ONFI, g_iNFI2X_CLKSRC, "NFI");
 #else
 			if (g_iNFI2X_CLKSRC == 0)
-				clk_set_parent(onfi_sel_clock, onfi_26m_clock);
+				clk_set_parent(onfi_sel_clk, onfi_26m_clk);
 			else if (g_iNFI2X_CLKSRC == 1)
-				clk_set_parent(onfi_sel_clock, syspll2_d2_clock);
+				clk_set_parent(onfi_sel_clk, onfi_mode5);
 			else if (g_iNFI2X_CLKSRC == 2)
-				clk_set_parent(onfi_sel_clock, syspll_d7_clock);
+				clk_set_parent(onfi_sel_clk, onfi_mode4);
 #endif
 #endif
 			DRV_WriteReg32(NFI_DLYCTRL_REG32, host->saved_para.sNFI_DLYCTRL_REG32);

@@ -113,8 +113,8 @@ static int barohub_get_pressure(char *buf, int bufsize)
 	time_stamp_gpt	= data.time_stamp_gpt;
 	pressure		= data.pressure_t.pressure;
 
-	BAR_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, pressure: %d!\n", time_stamp, time_stamp_gpt,
-			pressure);
+	/* BAR_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, pressure: %d!\n",
+	time_stamp, time_stamp_gpt, pressure); */
 
 	sprintf(buf, "%08x", pressure);
 	if (atomic_read(&obj->trace) & BAR_TRC_IOCTL)
@@ -261,6 +261,11 @@ static long barohub_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned
 			err = -EFAULT;
 			break;
 		}
+		err = sensor_set_delay_to_hub(ID_PRESSURE, 200);
+		if (err) {
+			BAR_ERR("sensor_set_delay_to_hub failed!\n");
+			break;
+		}
 		break;
 
 	case BAROMETER_IOCTL_READ_CHIPINFO:
@@ -308,12 +313,10 @@ static long barohub_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned
 			BAR_ERR("barohub_get_temperature fail\n");
 			break;
 		}
-		err = kstrtoint(strbuf, 16, &dat);
-		if (err == 0) {
-			if (copy_to_user(data, &dat, sizeof(dat))) {
-				err = -EFAULT;
-				break;
-			}
+		dat = 0;
+		if (copy_to_user(data, &dat, sizeof(dat))) {
+			err = -EFAULT;
+			break;
 		}
 		break;
 
@@ -459,7 +462,7 @@ static int barohub_probe(struct platform_device *pdev)
 	ctl.enable_nodata = barohub_enable_nodata;
 	ctl.set_delay = barohub_set_delay;
 	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_support_batch = false;
 
 	err = baro_register_control_path(&ctl);
 	if (err) {
@@ -474,7 +477,7 @@ static int barohub_probe(struct platform_device *pdev)
 		BAR_ERR("baro_register_data_path failed, err = %d\n", err);
 		goto exit_create_attr_failed;
 	}
-	err = batch_register_support_info(ID_PRESSURE, ctl.is_support_batch, data.vender_div, 0);
+	err = batch_register_support_info(ID_PRESSURE, ctl.is_support_batch, data.vender_div, 1);
 	if (err) {
 		BAR_ERR("register baro batch support err = %d\n", err);
 		goto exit_create_attr_failed;
@@ -515,40 +518,11 @@ static int barohub_remove(struct platform_device *pdev)
 }
 static int barohub_suspend(struct platform_device *pdev, pm_message_t msg)
 {
-	struct barohub_ipi_data *obj = platform_get_drvdata(pdev);
-	int err = 0;
-
-	BAR_FUN();
-
-	if (msg.event == PM_EVENT_SUSPEND) {
-		if (NULL == obj) {
-			BAR_ERR("null pointer\n");
-			return -EINVAL;
-		}
-
-		atomic_set(&obj->suspend, 1);
-		err = barohub_set_powermode(false);
-		if (err) {
-			BAR_ERR("barohub set suspend mode failed, err = %d\n", err);
-			return err;
-		}
-	}
-	return err;
+	return 0;
 }
 
 static int barohub_resume(struct platform_device *pdev)
 {
-	struct barohub_ipi_data *obj = platform_get_drvdata(pdev);
-
-	BAR_FUN();
-
-	if (NULL == obj) {
-		BAR_ERR("null pointer\n");
-		return -EINVAL;
-	}
-
-	atomic_set(&obj->suspend, 0);
-
 	return 0;
 }
 static struct platform_device barohub_device = {

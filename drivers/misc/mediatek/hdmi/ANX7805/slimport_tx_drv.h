@@ -31,8 +31,10 @@ typedef unsigned int uint;
 //typedef bit bool;
 //typedef unsigned long ulong;
 //typedef unsigned int WORD;
+
 #define Display_NoHDCP
 #define Redo_HDCP
+#define Standard_DP
 
 #define MAX_BUF_CNT 6
 
@@ -135,6 +137,15 @@ typedef enum {
 	AUDIO_W_LEN_23_24MAX = 0x09,
 	AUDIO_W_LEN_24_24MAX = 0x0b
 } AudioWdLen;
+
+enum
+{
+	VIDEO_3D_NONE		= 0x00,
+	VIDEO_3D_FRAME_PACKING		= 0x01,
+	VIDEO_3D_TOP_AND_BOTTOM		= 0x02,
+	VIDEO_3D_SIDE_BY_SIDE		= 0x03,
+	VIDEO_3D_INITIAL	= 0xFF
+};
 
 typedef enum {
 	I2S_CH_2 =0x01,
@@ -455,6 +466,8 @@ void SP_TX_Config_MIPI_Video_Format(void);
 void MIPI_Format_Index_Set(BYTE bFormatIndex);
 BYTE MIPI_Format_Index_Get(void);
 BYTE MIPI_CheckSum_Status_OK(void);
+void system_power_ctrl(BYTE ON);
+void slimport_config_video_output(void);
 
 
 #define	EmbededSync     1
@@ -476,12 +489,12 @@ typedef enum {
 	SP_TX_CONFIG_VIDEO_INPUT,
 	SP_TX_LINK_TRAINING,
 	SP_TX_CONFIG_VIDEO_OUTPUT,
-	SP_TX_CONFIG_AUDIO,
 	SP_TX_HDCP_AUTHENTICATION,
+	SP_TX_CONFIG_AUDIO,
 	SP_TX_PLAY_BACK
 } SP_TX_System_State;
 
-
+void SP_CTRL_Dump_Reg(void);
 void SP_CTRL_Main_Procss(void);
 BYTE SP_CTRL_Chip_Detect(void);
 void SP_CTRL_Chip_Initial(void);
@@ -519,8 +532,13 @@ _SP_TX_DRV_EX_C_ BYTE ext_int_index;
 _SP_TX_DRV_EX_C_ struct VideoFormat SP_TX_Video_Input;
 _SP_TX_DRV_EX_C_ struct AudioFormat SP_TX_Audio_Input;
 
-
-_SP_TX_DRV_EX_C_ BYTE sp_tx_rx_anx7730;
+enum RX_CBL_TYPE {
+	RX_HDMI = 0x01,
+	RX_DP = 0x02,
+	RX_VGA = 0x03,
+	RX_NULL = 0x00
+};
+_SP_TX_DRV_EX_C_ enum RX_CBL_TYPE sp_tx_rx_type;
 
 _SP_TX_DRV_EX_C_ BYTE CEC_abort_message_received;
 _SP_TX_DRV_EX_C_ BYTE CEC_get_physical_adress_message_received;
@@ -567,6 +585,9 @@ _SP_TX_DRV_EX_C_ BYTE bEDID_firstblock[128];
 _SP_TX_DRV_EX_C_ BYTE bEDID_fourblock[256];
 
 _SP_TX_DRV_EX_C_ bool audio_format_change;
+_SP_TX_DRV_EX_C_ bool video_format_change;
+_SP_TX_DRV_EX_C_ int three_3d_format;
+
 
 #if(REDUCE_REPEAT_PRINT_INFO)
 #define LOOP_PRINT_MSG_MAX 16

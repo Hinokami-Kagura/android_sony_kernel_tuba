@@ -86,6 +86,16 @@ void arch_cpu_idle(void)
 	local_irq_enable();
 }
 
+void arch_cpu_idle_enter(void)
+{
+	idle_notifier_call_chain(IDLE_START);
+}
+
+void arch_cpu_idle_exit(void)
+{
+	idle_notifier_call_chain(IDLE_END);
+}
+
 #ifdef CONFIG_HOTPLUG_CPU
 void arch_cpu_idle_dead(void)
 {
@@ -183,11 +193,6 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 		return;
 
 	printk("\n%s: %#lx:\n", name, addr);
-
-        if (addr > high_memory) {
-          printk("large then high_memory:%#lx)\n", high_memory);
-          return;
-	}
 
 	/*
 	 * round address down to a 32 bit boundary

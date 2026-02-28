@@ -9,14 +9,14 @@
  ******************************************************************************/
 
 
-#include <6755_gpio.h>
+#include "6755_gpio.h"
 #include <linux/types.h>
 #include "mt-plat/sync_write.h"
 #include <mt-plat/mt_gpio.h>
 #include <mt-plat/mt_gpio_core.h>
-#include <mt_gpio_base.h>
+#include "mt_gpio_base.h"
 /* autogen */
-#include <gpio_cfg.h>
+#include "gpio_cfg.h"
 #ifdef CONFIG_OF
 #include <linux/of_address.h>
 #endif
@@ -182,7 +182,7 @@ int mt_set_gpio_mode_base(unsigned long pin, unsigned long mode)
 	GPIO_WR32(&reg->mode[pos]._align1, data);
 
 #else
-	/* For Denali/Jade, there is no mwr register for simple register setting.
+	/* For DNL/JD, there is no mwr register for simple register setting.
 	 * Need 1R+1W to set MODE registers
 	 */
 	mask = (1L << GPIO_MODE_BITS) - 1;
@@ -463,15 +463,46 @@ int mt_get_gpio_pull_select_base(unsigned long pin)
 int mt_set_gpio_inversion_base(unsigned long pin, unsigned long enable)
 {				/*FIX-ME
 				 */
-	GPIOERR("%s:function not supprted for Jade", __func__);
+	GPIOERR("%s:function not supprted", __func__);
 	return RSUCCESS;
 }
 
 /*---------------------------------------------------------------------------*/
 int mt_get_gpio_inversion_base(unsigned long pin)
 {				/*FIX-ME */
-	GPIOERR("%s:function not supprted for Jade", __func__);
+	GPIOERR("%s:function not supprted", __func__);
 	return 0;		/* FIX-ME */
+}
+/*---------------------------------------------------------------------------*/
+int mt_set_gpio_slew_rate_base(unsigned long pin, unsigned long enable)
+{
+	return RSUCCESS;
+}
+
+/*---------------------------------------------------------------------------*/
+int mt_get_gpio_slew_rate_base(unsigned long pin)
+{
+	return RSUCCESS;
+}
+/*---------------------------------------------------------------------------*/
+int mt_set_gpio_pull_resistor_base(unsigned long pin, unsigned long resistors)
+{
+	return RSUCCESS;
+}
+/*---------------------------------------------------------------------------*/
+int mt_get_gpio_pull_resistor_base(unsigned long pin)
+{
+	return RSUCCESS;
+}
+/*---------------------------------------------------------------------------*/
+int mt_set_gpio_driving_base(unsigned long pin, unsigned long strength)
+{
+	return RSUCCESS;
+}
+/*---------------------------------------------------------------------------*/
+int mt_get_gpio_driving_base(unsigned long pin)
+{
+	return RSUCCESS;
 }
 
 /*---------------------------------------------------------------------------*/

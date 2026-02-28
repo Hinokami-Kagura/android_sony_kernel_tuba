@@ -309,7 +309,7 @@ static kal_uint32 return_sensor_id(void)
 {
 	//return ((read_cmos_sensor(0x0000) << 8) | read_cmos_sensor(0x0001) +8);
 	kal_uint32 sensorid;
-	sensorid =  ((read_cmos_sensor(0x0000) << 8) | read_cmos_sensor(0x0001)) + 8;
+	sensorid =  ((read_cmos_sensor(0x0000) << 8) | read_cmos_sensor(0x0001)) + (IMX219_TRULY_SENSOR_ID - IMX219_SENSOR_ID);
 	return sensorid;
 	//LOG_INF("read sensor id:%x", sensorid);
 	//return 0x0219;

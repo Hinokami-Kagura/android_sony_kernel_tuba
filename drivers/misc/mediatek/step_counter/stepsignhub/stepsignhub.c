@@ -11,41 +11,19 @@
  *
  */
 
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
-
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
 #include "stepsignhub.h"
 #include <step_counter.h>
-#include <linux/hwmsen_helper.h>
-
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include <linux/batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
 
 
+
 #define STEP_CDS_TAG                  "[stepsignhub] "
-#define STEP_CDS_FUN(f)               printk(STEP_CDS_TAG"%s\n", __func__)
-#define STEP_CDS_ERR(fmt, args...)    printk(STEP_CDS_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
-#define STEP_CDS_LOG(fmt, args...)    printk(STEP_CDS_TAG fmt, ##args)
+#define STEP_CDS_FUN(f)               pr_err(STEP_CDS_TAG"%s\n", __func__)
+#define STEP_CDS_ERR(fmt, args...)    pr_err(STEP_CDS_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
+#define STEP_CDS_LOG(fmt, args...)    pr_err(STEP_CDS_TAG fmt, ##args)
 
 typedef enum {
 	STEP_CDSH_TRC_INFO = 0X10,
@@ -141,17 +119,32 @@ static int step_chub_delete_attr(struct device_driver *driver)
 
 static int step_c_enable_nodata(int en)
 {
-	return sensor_enable_to_hub(ID_STEP_COUNTER, en);
+	int ret = 0;
+
+	/* if (en == 1)
+		ret = sensor_set_delay_to_hub(ID_STEP_COUNTER, 66); */
+	ret = sensor_enable_to_hub(ID_STEP_COUNTER, en);
+	return ret;
 }
 
 static int step_d_enable_nodata(int en)
 {
-	return sensor_enable_to_hub(ID_STEP_DETECTOR, en);
+	int ret = 0;
+
+	/* if (en == 1)
+		ret = sensor_set_delay_to_hub(ID_STEP_DETECTOR, 66); */
+	ret = sensor_enable_to_hub(ID_STEP_DETECTOR, en);
+	return ret;
 }
 
 static int step_s_enable_nodata(int en)
 {
-	return sensor_enable_to_hub(ID_SIGNIFICANT_MOTION, en);
+	int ret = 0;
+
+	if (en == 1)
+		ret = sensor_set_delay_to_hub(ID_SIGNIFICANT_MOTION, 66);
+	ret = sensor_enable_to_hub(ID_SIGNIFICANT_MOTION, en);
+	return ret;
 }
 
 static int step_c_set_delay(u64 delay)
@@ -162,6 +155,13 @@ static int step_c_set_delay(u64 delay)
 	return sensor_set_delay_to_hub(ID_STEP_COUNTER, delayms);
 }
 
+static int step_d_set_delay(u64 delay)
+{
+	unsigned int delayms = 0;
+
+	delayms = delay / 1000 / 1000;
+	return sensor_set_delay_to_hub(ID_STEP_DETECTOR, delayms);
+}
 static int step_counter_get_data(uint32_t *counter, int *status)
 {
 	int err = 0;
@@ -181,6 +181,14 @@ static int step_counter_get_data(uint32_t *counter, int *status)
 		     time_stamp_gpt, *counter);
 	return 0;
 }
+static int step_detector_get_data(uint32_t *counter, int *status)
+{
+	return 0;
+}
+static int significant_get_data(uint32_t *counter, int *status)
+{
+	return 0;
+}
 
 static int step_cds_open_report_data(int open)
 {
@@ -194,10 +202,8 @@ static int SCP_sensorHub_detect_notify_handler(void *data, unsigned int len)
 
 	switch (rsp->rsp.action) {
 	case SENSOR_HUB_NOTIFY:
-		STEP_CDS_LOG("sensorId = %d\n", rsp->notify_rsp.sensorType);
 		switch (rsp->notify_rsp.event) {
 		case SCP_NOTIFY:
-			if (ID_STEP_DETECTOR == rsp->notify_rsp.sensorType)
 				schedule_work(&(obj->step_d_work));
 			break;
 		default:
@@ -220,10 +226,8 @@ static int SCP_sensorHub_sign_notify_handler(void *data, unsigned int len)
 
 	switch (rsp->rsp.action) {
 	case SENSOR_HUB_NOTIFY:
-		STEP_CDS_LOG("sensorId = %d\n", rsp->notify_rsp.sensorType);
 		switch (rsp->notify_rsp.event) {
 		case SCP_NOTIFY:
-			if (ID_SIGNIFICANT_MOTION == rsp->notify_rsp.sensorType)
 				schedule_work(&(obj->step_s_work));
 			break;
 		default:
@@ -255,9 +259,10 @@ static int step_chub_local_init(void)
 	ctl.enable_nodata = step_c_enable_nodata;
 	ctl.enable_step_detect = step_d_enable_nodata;
 	ctl.enable_significant = step_s_enable_nodata;
-	ctl.set_delay = step_c_set_delay;
+	ctl.step_c_set_delay = step_c_set_delay;
+	ctl.step_d_set_delay = step_d_set_delay;
 	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_support_batch = false;
 	err = step_c_register_control_path(&ctl);
 	if (err) {
 		STEP_CDS_ERR("register step_cds control path err\n");
@@ -265,6 +270,8 @@ static int step_chub_local_init(void)
 	}
 
 	data.get_data = step_counter_get_data;
+	data.get_data_step_d = step_detector_get_data;
+	data.get_data_significant = significant_get_data;
 	err = step_c_register_data_path(&data);
 	if (err) {
 		STEP_CDS_ERR("register step_cds data path err\n");
@@ -284,6 +291,17 @@ static int step_chub_local_init(void)
 		STEP_CDS_ERR("SCP_sensorHub_rsp_registration fail!!\n");
 		goto exit_create_attr_failed;
 	}
+	err = batch_register_support_info(ID_STEP_DETECTOR, ctl.is_support_batch, 1, 1);
+	if (err) {
+		STEP_CDS_ERR("register hmdy batch support err = %d\n", err);
+		goto exit_create_attr_failed;
+	}
+	err = batch_register_support_info(ID_STEP_COUNTER, ctl.is_support_batch, 1, 1);
+	if (err) {
+		STEP_CDS_ERR("register hmdy batch support err = %d\n", err);
+		goto exit_create_attr_failed;
+	}
+
 	return 0;
 exit:
 	step_chub_delete_attr(&(step_cdshub_init_info.platform_diver_addr->driver));

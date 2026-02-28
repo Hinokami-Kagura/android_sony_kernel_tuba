@@ -451,6 +451,11 @@ static long maghub_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 		ret = maghub_m_setPowerMode(enable);
 		if (ret < 0)
 			MAGN_ERR("maghub_m_enable fail!\r\n");
+		if (enable == 1) {
+			sensor_set_delay_to_hub(ID_MAGNETIC, 100);
+			if (ret < 0)
+				MAGN_ERR("sensor_set_delay_to_hub fail!\r\n");
+		}
 		break;
 
 	case MSENSOR_IOCTL_READ_FACTORY_SENSORDATA:
@@ -458,12 +463,6 @@ static long maghub_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 			MAGN_ERR("IO parameter pointer is NULL!\r\n");
 			break;
 		}
-		ret = maghub_GetOData(buff, MAGHUB_BUFSIZE);
-		if (ret < 0) {
-			MAGN_ERR("maghub_GetOData fail!\r\n");
-			break;
-		}
-
 		if (copy_to_user(argp, buff, strlen(buff) + 1))
 			return -EFAULT;
 
@@ -712,8 +711,8 @@ static int maghub_probe(struct platform_device *pdev)
 	ctl.o_enable = maghub_o_enable;
 	ctl.o_set_delay = maghub_o_set_delay;
 	ctl.o_open_report_data = maghub_o_open_report_data;
-	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_report_input_direct = true;
+	ctl.is_support_batch = false;
 
 	err = mag_register_control_path(&ctl);
 	if (err) {
@@ -731,12 +730,12 @@ static int maghub_probe(struct platform_device *pdev)
 		MAGN_ERR("register data control path err\n");
 		goto create_attr_failed;
 	}
-	err = batch_register_support_info(ID_ORIENTATION, ctl.is_support_batch, mag_data.div_m, 0);
+	err = batch_register_support_info(ID_ORIENTATION, ctl.is_support_batch, mag_data.div_m, 1);
 	if (err) {
 		MAGN_ERR("register orientation batch support err = %d\n", err);
 		goto create_attr_failed;
 	}
-	err = batch_register_support_info(ID_MAGNETIC, ctl.is_support_batch, mag_data.div_o, 0);
+	err = batch_register_support_info(ID_MAGNETIC, ctl.is_support_batch, mag_data.div_o, 1);
 	if (err) {
 		MAGN_ERR("register magnetic batch support err = %d\n", err);
 		goto create_attr_failed;
@@ -773,36 +772,11 @@ static int maghub_remove(struct platform_device *pdev)
 
 static int maghub_suspend(struct platform_device *pdev, pm_message_t msg)
 {
-	int err = 0;
-	struct maghub_ipi_data *obj = platform_get_drvdata(pdev);
-
-	if (msg.event == PM_EVENT_SUSPEND) {
-		if (obj == NULL) {
-			MAGN_ERR("null pointer!!\n");
-			return -EINVAL;
-		}
-		atomic_set(&obj->suspend, 1);
-		err = maghub_m_setPowerMode(false);
-		if (err < 0)
-			MAGN_ERR("maghub_suspend fail!!\n");
-		err = maghub_o_setPowerMode(false);
-		if (err < 0)
-			MAGN_ERR("maghub_suspend fail!!\n");
-	}
 	return 0;
 }
 
 static int maghub_resume(struct platform_device *pdev)
 {
-
-	struct maghub_ipi_data *obj = platform_get_drvdata(pdev);
-
-	if (obj == NULL) {
-		MAGN_ERR("null pointer!!\n");
-		return -EINVAL;
-	}
-
-	atomic_set(&obj->suspend, 0);
 	return 0;
 }
 static struct platform_device maghub_device = {

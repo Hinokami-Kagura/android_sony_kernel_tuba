@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -392,13 +405,15 @@ static void write_cmos_sensor(kal_uint16 addr, kal_uint16 para)
     iWriteRegI2C(pusendcmd , 4, imgsensor.i2c_write_id);
 }
 
-static kal_uint16 read_cmos_sensor_8(kal_uint16 addr)
+static int read_cmos_sensor_8(kal_uint16 addr)
 {
-    kal_uint16 get_byte=0;
+    kal_int16 get_byte=0;
+	int ret = -1;
     char pusendcmd[2] = {(char)(addr >> 8) , (char)(addr & 0xFF) };
     kdSetI2CSpeed(imgsensor_info.i2c_speed); // Add this func to set i2c speed by each sensor
-    iReadRegI2C(pusendcmd , 2, (u8*)&get_byte,1,imgsensor.i2c_write_id);
-    return get_byte;
+    if(iReadRegI2C(pusendcmd , 2, (u8*)&get_byte,1,imgsensor.i2c_write_id)==0)
+		ret = get_byte;
+    return ret;
 }
 
 static void write_cmos_sensor_8(kal_uint16 addr, kal_uint8 para)
@@ -3609,6 +3624,7 @@ static void sensor_init(void)
 static void preview_setting(void)
 {
 	int retry=0;
+	int stream = 0;
 
 
 	//====================================================
@@ -3729,10 +3745,13 @@ S5K2P8MIPI_table_write_cmos_sensor(addr_data_pair_preview, sizeof(addr_data_pair
 		write_cmos_sensor_8(0x0217,0x00);
 		write_cmos_sensor_8(0x021B,0x00);
 	}
+	LOG_INF("before stream 0x0100 = %x\n",read_cmos_sensor(0x0100));
 	write_cmos_sensor(0x0100,0x0100);	//smiaRegs_rw_general_setup // Stream on
     /*EVB seldom output fail issue. Need retry*/
-	while(retry<20)
-	{if(read_cmos_sensor_8(0x0005)==0xff)
+	while(retry<21)
+	{
+ 	 stream = read_cmos_sensor_8(0x0005);
+	if(stream==0xff || stream ==-1)
 		{
 		  msleep(5);
 		  retry++;
@@ -3741,7 +3760,7 @@ S5K2P8MIPI_table_write_cmos_sensor(addr_data_pair_preview, sizeof(addr_data_pair
 	 else
 		{
 			retry=0;
-			LOGE("Sensor has output1 %x\n",read_cmos_sensor_8(0x0005));
+			LOGE("Sensor has output %x\n",read_cmos_sensor_8(0x0005));
 			break;
 		}
 	}
@@ -3782,7 +3801,7 @@ S5K2P8MIPI_table_write_cmos_sensor(addr_data_pair_preview, sizeof(addr_data_pair
 
 static void normal_capture_setting(void)
 {
-
+	int stream = 0;
 	int retry=0;
 	LOG_INF("E! ");
 	//====================================================
@@ -3890,21 +3909,23 @@ static void normal_capture_setting(void)
 	write_cmos_sensor(0x6F12,0xF51E);
 #endif
 	write_cmos_sensor(0x0100,0x0100);	//smiaRegs_rw_general_setup // Stream on
-	while(retry<20)
-		{if(read_cmos_sensor_8(0x0005)==0xff)
+	while(retry<21)
+		{
+		 stream = read_cmos_sensor_8(0x0005);
+		if(stream==0xff || stream ==-1)
 			{
 			  msleep(5);
 			  retry++;
-			   LOG_INF("Sensor has not output stream %x\n",read_cmos_sensor(0x0100));
+			  LOG_INF("Sensor has not output stream %x\n",read_cmos_sensor(0x0100));
 			}
 		 else
 			{
-
 				retry=0;
 				LOGE("Sensor has output %x\n",read_cmos_sensor_8(0x0005));
 				break;
 			}
 		}
+
 
 //		write_cmos_sensor(0x3A70,0x0000);
 //		write_cmos_sensor(0x3A72,0x0000);
@@ -3973,6 +3994,7 @@ static void normal_capture_setting(void)
 
 static void pip_capture_setting(void)
 {
+	int stream = 0;
 	int retry=0;
     LOG_INF( "S5K2P8 PIP setting Enter!");
 
@@ -4067,22 +4089,23 @@ static void pip_capture_setting(void)
 	write_cmos_sensor(0x6F12,0xF51E);
 #endif
 	write_cmos_sensor(0x0100,0x0100);	//smiaRegs_rw_general_setup // Stream on
-	while(retry<20)
-	{
-		if(read_cmos_sensor_8(0x0005)==0xff)
+	while(retry<21)
+		{
+		 stream = read_cmos_sensor_8(0x0005);
+		if(stream==0xff || stream ==-1)
 			{
 			  msleep(5);
 			  retry++;
-			   LOG_INF("Sensor has not output stream %x\n",read_cmos_sensor(0x0100));
+			  LOG_INF("Sensor has not output stream %x\n",read_cmos_sensor(0x0100));
 			}
 		 else
 			{
-
 				retry=0;
 				LOGE("Sensor has output %x\n",read_cmos_sensor_8(0x0005));
 				break;
 			}
-	}
+		}
+
 
 //	write_cmos_sensor(0x3A70,0x0000);
 //	write_cmos_sensor(0x3A72,0x0000);
@@ -4120,6 +4143,7 @@ static void pip_capture_setting(void)
 
 static void pip_capture_15fps_setting(void)
 {
+	int stream = 0;
     int retry=0;
     LOG_INF( "S5K2P8 PIP 15FPS setting Enter!");
 
@@ -4216,22 +4240,23 @@ static void pip_capture_15fps_setting(void)
     write_cmos_sensor(0x6F12,0xF51E);
 #endif
     write_cmos_sensor(0x0100,0x0100);   //smiaRegs_rw_general_setup // Stream on
-    while(retry<20)
-	{
-		if(read_cmos_sensor_8(0x0005)==0xff)
+	while(retry<21)
+		{
+		 stream = read_cmos_sensor_8(0x0005);
+		if(stream==0xff || stream ==-1)
 			{
 			  msleep(5);
 			  retry++;
-			   LOG_INF("Sensor has not output stream %x\n",read_cmos_sensor(0x0100));
+			  LOG_INF("Sensor has not output stream %x\n",read_cmos_sensor(0x0100));
 			}
 		 else
 			{
-
 				retry=0;
 				LOGE("Sensor has output %x\n",read_cmos_sensor_8(0x0005));
 				break;
 			}
-	}
+		}
+
 
 }
 
@@ -4257,6 +4282,7 @@ static void normal_video_setting(kal_uint16 currefps)
 }
 static void hs_video_setting(void)
 {
+int stream = 0;
 int retry=0;
 	LOG_INF("E");
 #ifdef SLOW_MOTION_120FPS
@@ -4493,20 +4519,23 @@ int retry=0;
 //	write_cmos_sensor(0x3ACC,0x0000);
 //	write_cmos_sensor(0x3ACE,0x0000);
 #endif
-while(retry<20)
-	   {if(read_cmos_sensor_8(0x0005)==0xff)
-		   {
-			 msleep(5);
-			 retry++;
+	while(retry<21)
+		{
+	 	 stream = read_cmos_sensor_8(0x0005);
+		if(stream==0xff || stream ==-1)
+			{
+			  msleep(5);
+			  retry++;
 			  LOG_INF("Sensor has not output stream %x\n",read_cmos_sensor(0x0100));
-		   }
-		else
-		   {
-			   retry=0;
-			   LOGE("Sensor has output %x\n",read_cmos_sensor_8(0x0005));
-			   break;
-		   }
-	   }
+			}
+		 else
+			{
+				retry=0;
+				LOGE("Sensor has output %x\n",read_cmos_sensor_8(0x0005));
+				break;
+			}
+		}
+
 }
 
 static void slim_video_setting(void)
@@ -5446,7 +5475,7 @@ static kal_uint32 set_max_framerate_by_scenario(MSDK_SCENARIO_ID_ENUM scenario_i
 
 static kal_uint32 get_default_framerate_by_scenario(MSDK_SCENARIO_ID_ENUM scenario_id, MUINT32 *framerate)
 {
-	LOG_INF("scenario_id = %d\n", scenario_id);
+	//LOG_INF("scenario_id = %d\n", scenario_id);
 
 	switch (scenario_id) {
 		case MSDK_SCENARIO_ID_CAMERA_PREVIEW:

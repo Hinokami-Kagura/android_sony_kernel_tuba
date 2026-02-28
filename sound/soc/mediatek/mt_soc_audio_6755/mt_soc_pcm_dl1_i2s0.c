@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -75,7 +77,7 @@ static int mi2s0_sidegen_control;
 static int mi2s0_hdoutput_control;
 static int mi2s0_extcodec_echoref_control;
 static const char const *i2s0_SIDEGEN[] = {
-	"Off", "On48000", "On44100", "On32000", "On16000", "On8000" };
+	"Off", "On48000", "On44100", "On32000", "On16000", "On8000", "On16000MD3"};
 static const char const *i2s0_HD_output[] = {"Off", "On"};
 static const char const *i2s0_ExtCodec_EchoRef[] = {"Off", "On"};
 
@@ -92,11 +94,10 @@ static int Audio_i2s0_SideGen_Get(struct snd_kcontrol *kcontrol,
 	ucontrol->value.integer.value[0] = mi2s0_sidegen_control;
 	return 0;
 }
+static int samplerate;
 
 static int Audio_i2s0_SideGen_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
-	uint32 samplerate = 0;
-
 	if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(i2s0_SIDEGEN)) {
 		pr_err("return -EINVAL\n");
 		return -EINVAL;
@@ -127,24 +128,48 @@ static int Audio_i2s0_SideGen_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_
 			      Soc_Aud_InterConnectionInput_I14, Soc_Aud_InterConnectionOutput_O00);
 		SetConnection(Soc_Aud_InterCon_Connection,
 			      Soc_Aud_InterConnectionInput_I14, Soc_Aud_InterConnectionOutput_O01);
+	} else if (mi2s0_sidegen_control == 6) {
+		samplerate = 16000;
+		/* here start digital part */
+		SetConnection(Soc_Aud_InterCon_Connection,
+			      Soc_Aud_InterConnectionInput_I09, Soc_Aud_InterConnectionOutput_O00);
+		SetConnection(Soc_Aud_InterCon_Connection,
+			      Soc_Aud_InterConnectionInput_I09, Soc_Aud_InterConnectionOutput_O01);
 	} else if (mi2s0_sidegen_control == 0) {
 		SetConnection(Soc_Aud_InterCon_DisConnect,
 			Soc_Aud_InterConnectionInput_I14, Soc_Aud_InterConnectionOutput_O00);
 		SetConnection(Soc_Aud_InterCon_DisConnect,
 			Soc_Aud_InterConnectionInput_I14, Soc_Aud_InterConnectionOutput_O01);
+		SetConnection(Soc_Aud_InterCon_DisConnect,
+			Soc_Aud_InterConnectionInput_I09, Soc_Aud_InterConnectionOutput_O00);
+		SetConnection(Soc_Aud_InterCon_DisConnect,
+			Soc_Aud_InterConnectionInput_I09, Soc_Aud_InterConnectionOutput_O01);
+	} else {
+		samplerate = 48000;
+		pr_err("Wrong sidegen_control input\n");
 	}
 
 	if (mi2s0_extcodec_echoref_control == true) {
 		if (mi2s0_sidegen_control != 0) {
-			/* phone call echo reference connection enable: I1 ->O24 */
-			PRINTK_AUD_DL1("%s() InterCon  AFE_CONN9 I01 -> O24 enable\n",  __func__);
-			SetConnection(Soc_Aud_InterCon_Connection,
-				Soc_Aud_InterConnectionInput_I01, Soc_Aud_InterConnectionOutput_O24);
+			if (mi2s0_sidegen_control == 6) {
+				/* phone call echo reference connection enable: I1 ->O27 */
+				PRINTK_AUD_DL1("%s() InterCon  AFE_CONN9 I01 -> O27 enable\n",  __func__);
+				SetConnection(Soc_Aud_InterCon_Connection,
+					Soc_Aud_InterConnectionInput_I01, Soc_Aud_InterConnectionOutput_O27);
+
+			} else {
+				/* phone call echo reference connection enable: I1 ->O24 */
+				PRINTK_AUD_DL1("%s() InterCon  AFE_CONN9 I01 -> O24 enable\n",  __func__);
+				SetConnection(Soc_Aud_InterCon_Connection,
+					Soc_Aud_InterConnectionInput_I01, Soc_Aud_InterConnectionOutput_O24);
+			}
 		} else {
 			/* phone call echo reference connection disable: I1->024 && I1->O27 */
 			PRINTK_AUD_DL1("%s() InterCon  AFE_CONN9 I01 -> O24/O27 disable\n",  __func__);
 			SetConnection(Soc_Aud_InterCon_DisConnect,
 				Soc_Aud_InterConnectionInput_I01, Soc_Aud_InterConnectionOutput_O24);
+			SetConnection(Soc_Aud_InterCon_DisConnect,
+				Soc_Aud_InterConnectionInput_I01, Soc_Aud_InterConnectionOutput_O27);
 		}
 	}
 
@@ -267,7 +292,7 @@ static int mtk_pcm_i2s0_stop(struct snd_pcm_substream *substream)
 	AFE_BLOCK_T *Afe_Block = &(pI2s0MemControl->rBlock);
 
 	pr_debug("mtk_pcm_i2s0_stop\n");
-	SetIrqEnable(Soc_Aud_IRQ_MCU_MODE_IRQ1_MCU_MODE, false);
+	irq_remove_user(substream, Soc_Aud_IRQ_MCU_MODE_IRQ1_MCU_MODE);
 
 	/* here start digital part */
 	SetConnection(Soc_Aud_InterCon_DisConnect, Soc_Aud_InterConnectionInput_I05,
@@ -453,11 +478,8 @@ static int mtk_pcm_i2s0_start(struct snd_pcm_substream *substream)
 	    || runtime->format == SNDRV_PCM_FORMAT_S32_LE) {
 		SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL1,
 					     AFE_WLEN_32_BIT_ALIGN_8BIT_0_24BIT_DATA);
-		SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL2,
-					     AFE_WLEN_32_BIT_ALIGN_8BIT_0_24BIT_DATA);
 	} else {
 		SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL1, AFE_WLEN_16_BIT);
-		SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_DL2, AFE_WLEN_16_BIT);
 	}
 
 	SetoutputConnectionFormat(OUTPUT_DATA_FORMAT_16BIT, Soc_Aud_InterConnectionOutput_O00);
@@ -485,9 +507,10 @@ static int mtk_pcm_i2s0_start(struct snd_pcm_substream *substream)
 	SetMemoryPathEnable(Soc_Aud_Digital_Block_MEM_DL1, true);
 
 	/* here to set interrupt */
-	SetIrqMcuCounter(Soc_Aud_IRQ_MCU_MODE_IRQ1_MCU_MODE, runtime->period_size);
-	SetIrqMcuSampleRate(Soc_Aud_IRQ_MCU_MODE_IRQ1_MCU_MODE, runtime->rate);
-	SetIrqEnable(Soc_Aud_IRQ_MCU_MODE_IRQ1_MCU_MODE, true);
+	irq_add_user(substream,
+		     Soc_Aud_IRQ_MCU_MODE_IRQ1_MCU_MODE,
+		     substream->runtime->rate,
+		     substream->runtime->period_size);
 
 	EnableAfe(true);
 

@@ -11,32 +11,9 @@
  *
  */
 
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
-
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
 #include "tiltdetecthub.h"
 #include <tilt_detector.h>
-#include <linux/hwmsen_helper.h>
-
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include <linux/batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
@@ -151,7 +128,17 @@ static int tilt_detect_get_data(int *probability, int *status)
 }
 static int tilt_detect_open_report_data(int open)
 {
-	return sensor_enable_to_hub(ID_TILT_DETECTOR, open);
+	int ret = 0;
+
+	ret = sensor_enable_to_hub(ID_TILT_DETECTOR, open);
+	return ret;
+}
+static int tilt_detect_set_delay(uint64_t delay)
+{
+	unsigned int delayms = 0;
+
+	delayms = delay / 1000 / 1000;
+	return sensor_set_delay_to_hub(ID_TILT_DETECTOR, delayms);
 }
 static int SCP_sensorHub_notify_handler(void *data, unsigned int len)
 {
@@ -189,6 +176,9 @@ static int tiltdetecthub_local_init(void)
 		goto exit_create_attr_failed;
 	}
 	ctl.open_report_data = tilt_detect_open_report_data;
+	ctl.set_delay = tilt_detect_set_delay;
+	ctl.is_report_input_direct = false;
+	ctl.is_support_batch = false;
 	err = tilt_register_control_path(&ctl);
 	if (err) {
 		TILTDETHUB_ERR("register tilt_detect control path err\n");
@@ -205,6 +195,11 @@ static int tiltdetecthub_local_init(void)
 	err = SCP_sensorHub_rsp_registration(ID_TILT_DETECTOR, SCP_sensorHub_notify_handler);
 	if (err) {
 		TILTDETHUB_ERR("SCP_sensorHub_rsp_registration fail!!\n");
+		goto exit_create_attr_failed;
+	}
+	err = batch_register_support_info(ID_TILT_DETECTOR, ctl.is_support_batch, 1, 1);
+	if (err) {
+		TILTDETHUB_ERR("register TILT batch support err = %d\n", err);
 		goto exit_create_attr_failed;
 	}
 	return 0;

@@ -179,6 +179,9 @@ static DEFINE_MUTEX(gyroscope_mutex);
 static bool enable_status;
 
 static int gyroscope_init_flag = -1;	/* 0<==>OK -1 <==> fail */
+#ifdef MPU6515_ACCESS_BY_GSE_I2C
+extern int gsensor_init_flag;	/* 0<==>OK -1 <==> fail */
+#endif
 
 static struct gyro_init_info gyroscope_init_info = {
 	.name = "mpu6515",
@@ -415,7 +418,8 @@ static int MPU6515_SetPowerMode(struct i2c_client *client, bool enable)
 	int res = 0;
 
 	if (enable == sensor_power) {
-		GYRO_LOG("Sensor power status is newest!\n");
+		if (atomic_read(&obj->trace) & GYRO_TRC_INFO)
+			GYRO_LOG("Sensor power status is newest!\n");
 		return MPU6515_SUCCESS;
 	}
 #ifdef MPU6515_ACCESS_BY_GSE_I2C
@@ -547,7 +551,7 @@ static int MPU6515_SetSampleRate(struct i2c_client *client, int sample_rate)
 	int rate_div = 0;
 	int res = 0;
 
-	GYRO_FUN();
+	/* GYRO_FUN(); */
 #ifdef MPU6515_ACCESS_BY_GSE_I2C
 	if (MPU6515_hwmsen_read_byte(MPU6515_REG_CFG, databuf))
 #else
@@ -675,7 +679,7 @@ static int MPU6515_FIFOConfig(struct i2c_client *client, u8 clk)
 /*----------------------------------------------------------------------------*/
 static int MPU6515_ReadFifoData(struct i2c_client *client, s16 *data, int *datalen)
 {
-	struct mpu6515_i2c_data *obj = i2c_get_clientdata(client);
+	struct mpu6515_i2c_data *obj;
 	u8 buf[MPU6515_DATA_LEN] = { 0 };
 	s16 tmp1[MPU6515_AXES_NUM] = { 0 };
 	s16 tmp2[MPU6515_AXES_NUM] = { 0 };
@@ -688,6 +692,8 @@ static int MPU6515_ReadFifoData(struct i2c_client *client, s16 *data, int *datal
 
 	if (NULL == client)
 		return -EINVAL;
+
+	obj = i2c_get_clientdata(client);
 
 	/* stop putting data in FIFO */
 	MPU6515_ReadStart(client, FALSE);
@@ -987,11 +993,6 @@ static int MPU6515_SMTReadSensorData(struct i2c_client *client, s16 *buf, int bu
 
 	GYRO_FUN();
 
-	MPU6515_SetPWR_MGMT_2(client, true);
-	if (sensor_power == false)
-		MPU6515_SetPowerMode(client, true);
-
-
 	if (NULL == buf)
 		return -1;
 
@@ -999,6 +1000,11 @@ static int MPU6515_SMTReadSensorData(struct i2c_client *client, s16 *buf, int bu
 		*buf = 0;
 		return -2;
 	}
+
+	MPU6515_SetPWR_MGMT_2(client, true);
+	if (sensor_power == false)
+		MPU6515_SetPowerMode(client, true);
+
 
 	for (i = 0; i < MPU6515_AXES_NUM; i++) {
 		res = MPU6515_FIFOConfig(client, (i + 1));
@@ -1107,15 +1113,27 @@ static int MPU6515_ReadPowerStatus(struct i2c_client *client, char *buf, int buf
 static ssize_t show_chipinfo_value(struct device_driver *ddri, char *buf)
 {
 	struct i2c_client *client = mpu6515_i2c_client;
-	char strbuf[MPU6515_BUFSIZE];
+	/* char strbuf[MPU6515_BUFSIZE]; */
+	char *strbuf;
+	int ret;
 
 	if (NULL == client) {
 		GYRO_ERR("i2c client is null!!\n");
 		return 0;
 	}
 
+	strbuf = kmalloc(MPU6515_BUFSIZE, GFP_KERNEL);
+	if (!strbuf) {
+		GYRO_ERR("strbuf is null!!\n");
+		return 0;
+	}
+
 	MPU6515_ReadChipInfo(client, strbuf, MPU6515_BUFSIZE);
-	return snprintf(buf, PAGE_SIZE, "%s\n", strbuf);
+
+	ret = snprintf(buf, PAGE_SIZE, "%s\n", strbuf);
+	kfree(strbuf);
+
+	return ret;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1275,6 +1293,7 @@ static int mpu6515_gpio_config(void)
 	if (IS_ERR(pins_cfg)) {
 		ret = PTR_ERR(pins_cfg);
 		GYRO_ERR("Cannot find gyro pinctrl pin_cfg!\n");
+		return 0;
 
 	}
 	pinctrl_select_state(pinctrl, pins_cfg);
@@ -1322,7 +1341,8 @@ static int mpu6515_init_client(struct i2c_client *client, bool enable)
 		return res;
 
 
-	GYRO_LOG("mpu6515_init_client OK!\n");
+	if (atomic_read(&obj->trace) & GYRO_TRC_INFO)
+		GYRO_LOG("mpu6515_init_client OK!\n");
 
 #ifdef CONFIG_MPU6515_LOWPASS
 	memset(&obj->fir, 0x00, sizeof(obj->fir));
@@ -1587,13 +1607,15 @@ static int mpu6515_suspend(struct i2c_client *client, pm_message_t msg)
 	struct mpu6515_i2c_data *obj = i2c_get_clientdata(client);
 	int err = 0;
 
-	GYRO_FUN();
+	if (obj == NULL) {
+		GYRO_ERR("null pointer!!\n");
+		return -EINVAL;
+	}
+
+	if (atomic_read(&obj->trace) & GYRO_TRC_INFO)
+		GYRO_FUN();
 
 	if (msg.event == PM_EVENT_SUSPEND) {
-		if (obj == NULL) {
-			GYRO_ERR("null pointer!!\n");
-			return -EINVAL;
-		}
 		atomic_set(&obj->suspend, 1);
 		MPU6515_SetPWR_MGMT_2(client, false);
 #ifndef CUSTOM_KERNEL_SENSORHUB
@@ -1614,12 +1636,13 @@ static int mpu6515_resume(struct i2c_client *client)
 	struct mpu6515_i2c_data *obj = i2c_get_clientdata(client);
 	int err;
 
-	GYRO_FUN();
-
 	if (obj == NULL) {
 		GYRO_ERR("null pointer!!\n");
 		return -EINVAL;
 	}
+
+	if (atomic_read(&obj->trace) & GYRO_TRC_INFO)
+		GYRO_FUN();
 
 	MPU6515_power(obj->hw, 1);
 	MPU6515_SetPWR_MGMT_2(client, enable_status);
@@ -1779,7 +1802,7 @@ static int gyroscope_get_data(int *x, int *y, int *z, int *status)
 /*----------------------------------------------------------------------------*/
 static int mpu6515_i2c_detect(struct i2c_client *client, struct i2c_board_info *info)
 {
-	strcpy(info->type, MPU6515_DEV_NAME);
+	strncpy(info->type, MPU6515_DEV_NAME, sizeof(info->type));
 	return 0;
 }
 
@@ -1806,7 +1829,7 @@ static int mpu6515_i2c_probe(struct i2c_client *client, const struct i2c_device_
 	err = hwmsen_get_convert(obj->hw->direction, &obj->cvt);
 	if (err) {
 		GYRO_ERR("invalid direction: %d\n", obj->hw->direction);
-		goto exit;
+		goto exit_kfree;
 	}
 
 
@@ -1829,7 +1852,10 @@ static int mpu6515_i2c_probe(struct i2c_client *client, const struct i2c_device_
 	atomic_set(&obj->trace, 0);
 	atomic_set(&obj->suspend, 0);
 
-
+#ifdef MPU6515_ACCESS_BY_GSE_I2C
+	if (-1 == gsensor_init_flag)
+		goto exit_init_failed;
+#endif
 
 	mpu6515_i2c_client = new_client;
 	err = mpu6515_init_client(new_client, false);

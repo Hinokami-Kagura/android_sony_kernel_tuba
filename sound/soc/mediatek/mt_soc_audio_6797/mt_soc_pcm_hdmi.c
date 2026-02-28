@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -82,10 +84,10 @@ static int mtk_afe_hdmi_probe(struct snd_soc_platform *platform);
 #define MAX_PCM_DEVICES     4
 #define MAX_PCM_SUBSTREAMS  128
 #define MAX_MIDI_DEVICES
-/* #define _DEBUG_TDM_KERNEL_ */
+#define _DEBUG_TDM_KERNEL_
 #define _NO_SRAM_USAGE_
 #define _TDM_8CH_SGEN_TEST 1
-
+#define _ANX7805_SLIMPORT_CHANNEL 2
 
 /* defaults */
 /* #define HDMI_MAX_BUFFER_SIZE     (192*1024) */
@@ -313,10 +315,13 @@ static void SetHDMIAddress(void)
 
 
 static int mHdmi_sidegen_control;
+static int mHdmi_display_control;
 static const char const *HDMI_SIDEGEN[] = { "Off", "On" };
+static const char const *HDMI_DISPLAY[] = { "MHL", "SLIMPORT" };
 
 static const struct soc_enum Audio_Hdmi_Enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(HDMI_SIDEGEN), HDMI_SIDEGEN),
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(HDMI_DISPLAY), HDMI_DISPLAY),
 };
 
 static int Audio_hdmi_SideGen_Get(struct snd_kcontrol *kcontrol,
@@ -353,17 +358,25 @@ static int Audio_hdmi_SideGen_Set(struct snd_kcontrol *kcontrol,
 		SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_HDMI, AFE_WLEN_16_BIT);
 		SetHDMIdatalength(Soc_Aud_I2S_WLEN_WLEN_16BITS);
 		SetTDMDatalength(Soc_Aud_I2S_WLEN_WLEN_16BITS);
-		SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_16BITS);
-		Tdm_Lrck = ((Soc_Aud_I2S_WLEN_WLEN_16BITS + 1) * 16) - 1;
+
+		if (mHdmi_display_control == 1)
+			Tdm_Lrck = ((Soc_Aud_I2S_WLEN_WLEN_32BITS + 1) * 16) - 1;
+		else
+			Tdm_Lrck = ((Soc_Aud_I2S_WLEN_WLEN_16BITS + 1) * 16) - 1;
 
 		/* set APLL clock setting */
-		/*EnableApll1(true); */
-		/*EnableApll2(true); */
+		EnableApll1(true);
+		EnableApll2(true);
 		EnableI2SDivPower(AUDIO_APLL12_DIV4, true);
 		EnableI2SDivPower(AUDIO_APLL12_DIVB, true);
 
 		MclkDiv = SetCLkMclk(Soc_Aud_I2S4, samplerate);
-		SetCLkBclk(MclkDiv, samplerate, Channels, Soc_Aud_I2S_WLEN_WLEN_16BITS);
+		if (mHdmi_display_control == 1) {
+			SetCLkBclk(MclkDiv, samplerate, _ANX7805_SLIMPORT_CHANNEL,
+					   Soc_Aud_I2S_WLEN_WLEN_32BITS);
+		} else {
+			SetCLkBclk(MclkDiv, samplerate, Channels, Soc_Aud_I2S_WLEN_WLEN_16BITS);
+		}
 
 		SetHDMIsamplerate(samplerate);
 		SetHDMIChannels(HDMIchaanel);
@@ -371,7 +384,10 @@ static int Audio_hdmi_SideGen_Set(struct snd_kcontrol *kcontrol,
 		SetHDMIBCLK();
 
 		SetTDMLrckWidth(Tdm_Lrck);
-		SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_16BITS);
+		if (mHdmi_display_control == 1)
+			SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_32BITS);
+		else
+			SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_16BITS);
 		SetTDMChannelsSdata(Channels);
 		SetTDMDatalength(Soc_Aud_I2S_WLEN_WLEN_16BITS);
 		SetTDMI2Smode(Soc_Aud_I2S_FORMAT_I2S);
@@ -427,9 +443,30 @@ static int Audio_hdmi_SideGen_Set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int Audio_hdmi_disport_Get(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	pr_warn("Audio_hdmi_slimport_Get = %d\n", mHdmi_display_control);
+	ucontrol->value.integer.value[0] = mHdmi_display_control;
+	return 0;
+}
+
+static int Audio_hdmi_disport_Set(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	pr_warn("Audio_hdmi_slimport_Set = %d\n", mHdmi_display_control);
+	if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(HDMI_DISPLAY)) {
+		pr_err("return -EINVAL\n");
+		return -EINVAL;
+	}
+	mHdmi_display_control = ucontrol->value.integer.value[0];
+	return 0;
+}
 static const struct snd_kcontrol_new Audio_snd_hdmi_controls[] = {
 	SOC_ENUM_EXT("Audio_Hdmi_SideGen_Switch", Audio_Hdmi_Enum[0], Audio_hdmi_SideGen_Get,
-		     Audio_hdmi_SideGen_Set)
+		     Audio_hdmi_SideGen_Set),
+	SOC_ENUM_EXT("Audio_Hdmi_Display_Switch", Audio_Hdmi_Enum[1], Audio_hdmi_disport_Get,
+		     Audio_hdmi_disport_Set),
 };
 
 
@@ -459,12 +496,12 @@ static int mtk_pcm_hdmi_stop(struct snd_pcm_substream *substream)
 
 	pr_warn("mtk_pcm_hdmi_stop\n");
 
-	SetIrqEnable(Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE, false);
+	irq_remove_user(substream, Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE);
 
 	SetMemoryPathEnable(Soc_Aud_Digital_Block_MEM_HDMI, false);
 
 #ifdef _DEBUG_TDM_KERNEL_
-	Afe_Set_Reg(AFE_TDM_CON2, 0, 0x00010000);	/* disable TDM to I2S path */
+	Afe_Set_Reg(AFE_TDM_CON2, 0, 0x00100000);	/* disable TDM to I2S path */
 	Afe_Set_Reg(AFE_I2S_CON, 0, 0x00000001);	/* I2S disable */
 	/*msleep(1); */
 #endif
@@ -602,6 +639,7 @@ static int mtk_pcm_hdmi_hw_params(struct snd_pcm_substream *substream,
 		runtime->dma_area = HDMI_dma_buf->area;
 		runtime->dma_addr = HDMI_dma_buf->addr;
 		SetHighAddr(Soc_Aud_Digital_Block_MEM_HDMI, true);
+		AudDrv_Emi_Clk_On();
 #else
 		runtime->dma_area = (unsigned char *)Get_Afe_SramBase_Pointer();
 		runtime->dma_addr = AFE_INTERNAL_SRAM_PHY_BASE;
@@ -613,6 +651,7 @@ static int mtk_pcm_hdmi_hw_params(struct snd_pcm_substream *substream,
 	} else {
 		PRINTK_AUD_HDMI("[mtk_pcm_hdmi_hw_params] snd_pcm_lib_malloc_pages\n");
 		ret = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(hw_params));
+		AudDrv_Emi_Clk_On();
 	}
 	PRINTK_AUD_HDMI("2 dma_bytes = %zu dma_area = %p dma_addr = 0x%lx\n",
 			substream->runtime->dma_bytes, substream->runtime->dma_area,
@@ -626,8 +665,14 @@ static int mtk_pcm_hdmi_hw_params(struct snd_pcm_substream *substream,
 static int mtk_pcm_hdmi_hw_free(struct snd_pcm_substream *substream)
 {
 	PRINTK_AUD_HDMI("mtk_pcm_hdmi_hw_free\n");
-	if (fake_buffer)
+	if (fake_buffer) {
+#ifdef _NO_SRAM_USAGE_
+		AudDrv_Emi_Clk_Off();
+#endif
 		return 0;
+	}
+
+	AudDrv_Emi_Clk_Off();
 	return snd_pcm_lib_free_pages(substream);
 }
 
@@ -648,10 +693,9 @@ static int mtk_pcm_hdmi_open(struct snd_pcm_substream *substream)
 {
 
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	int err = 0;
 	int ret = 0;
 
-	PRINTK_AUD_HDMI("mtk_pcm_hdmi_open\n");
+	pr_warn("mtk_pcm_hdmi_open\n");
 
 	pMemControl = Get_Mem_ControlT(Soc_Aud_Digital_Block_MEM_HDMI);
 
@@ -681,13 +725,8 @@ static int mtk_pcm_hdmi_open(struct snd_pcm_substream *substream)
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 		PRINTK_AUD_HDMI("SNDRV_PCM_STREAM_PLAYBACK mtkalsa_hdmi_playback_constraints\n");
 
-	if (err < 0) {
-		PRINTK_AUD_HDMI("mtk_pcm_hdmi_close\n");
-		mtk_pcm_hdmi_close(substream);
-		return err;
-	}
-	/*EnableApll1(true);
-	EnableApll2(true);*/
+	EnableApll1(true);
+	EnableApll2(true);
 	EnableI2SDivPower(AUDIO_APLL12_DIV4, true);
 	EnableI2SDivPower(AUDIO_APLL12_DIVB, true);
 
@@ -700,7 +739,7 @@ static int mtk_pcm_hdmi_open(struct snd_pcm_substream *substream)
 
 static int mtk_pcm_hdmi_close(struct snd_pcm_substream *substream)
 {
-	PRINTK_AUD_HDMI("%s\n", __func__);
+	pr_warn("%s\n", __func__);
 
 	/* SetTDMEnable(false); //enable TDM */
 	/* SetHDMIEnable(false); */
@@ -709,13 +748,9 @@ static int mtk_pcm_hdmi_close(struct snd_pcm_substream *substream)
 	EnableI2SDivPower(AUDIO_APLL12_DIV4, false);
 	EnableI2SDivPower(AUDIO_APLL12_DIVB, false);
 
-#ifdef _DEBUG_TDM_KERNEL_
-	EnableI2SDivPower(AUDIO_APLL1_DIV0, false);
-	EnableI2SDivPower(AUDIO_APLL2_DIV0, false);
-#endif
 	mHDMIPrepareDone = false;
-	/*EnableApll1(false);
-	EnableApll2(false);*/
+	EnableApll1(false);
+	EnableApll2(false);
 
 	AudDrv_Clk_Off();
 
@@ -728,11 +763,11 @@ static int mtk_pcm_hdmi_prepare(struct snd_pcm_substream *substream)
 	uint32 Tdm_Lrck = 0;
 	uint32 MclkDiv = 0;
 
-	PRINTK_AUD_HDMI
-	    ("mtk_pcm_hdmi_prepare format =%d, rate = %d  channels = %d period_size = %lu\n",
-	     runtime->format, runtime->rate, runtime->channels, runtime->period_size);
+	pr_warn
+	    ("%s format =%d, rate = %d  channels = %d period_size = %lu, mHdmi_display_control=%d\n",
+	     __func__, runtime->format, runtime->rate, runtime->channels, runtime->period_size, mHdmi_display_control);
 #if 0
-	SetIrqEnable(Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE, false);
+	irq_remove_user(substream, Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE);
 
 	SetMemoryPathEnable(Soc_Aud_Digital_Block_MEM_HDMI, false);
 
@@ -761,38 +796,58 @@ static int mtk_pcm_hdmi_prepare(struct snd_pcm_substream *substream)
 						     AFE_WLEN_32_BIT_ALIGN_8BIT_0_24BIT_DATA);
 			SetHDMIdatalength(Soc_Aud_I2S_WLEN_WLEN_32BITS);
 			SetTDMDatalength(Soc_Aud_I2S_WLEN_WLEN_32BITS);
-			SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_32BITS);
 			Tdm_Lrck = ((Soc_Aud_I2S_WLEN_WLEN_32BITS + 1) * 16) - 1;
 
 			/*SetCLkBclk(MclkDiv, runtime->rate, runtime->channels, Soc_Aud_I2S_WLEN_WLEN_16BITS); */
-			SetCLkBclk(MclkDiv, runtime->rate, runtime->channels,
-				   Soc_Aud_I2S_WLEN_WLEN_32BITS);
+			if (mHdmi_display_control == 1) {
+				SetCLkBclk(MclkDiv, runtime->rate, _ANX7805_SLIMPORT_CHANNEL,
+					   Soc_Aud_I2S_WLEN_WLEN_32BITS);
+			} else {
+				SetCLkBclk(MclkDiv, runtime->rate, runtime->channels,
+					   Soc_Aud_I2S_WLEN_WLEN_32BITS);
+			}
 
 			SetTDMLrckWidth(Tdm_Lrck);
 			SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_32BITS);
-			SetTDMChannelsSdata(runtime->channels);	/* notify data pin */
+
+			if (mHdmi_display_control == 1)
+				SetTDMChannelsSdata(_ANX7805_SLIMPORT_CHANNEL);	/* ANX7805 only I2s  */
+			else
+				SetTDMChannelsSdata(runtime->channels);	/* notify data pin */
 
 			SetTDMDatalength(Soc_Aud_I2S_WLEN_WLEN_32BITS);
-/*            SetTDMLrckInverse(true);*/
+			/*SetTDMLrckInverse(true);*/
 			SetTDMBckInverse(false);
 		} else {
-			pr_debug("mtk_pcm_hdmi_prepare 16bit\n ");
+			pr_debug("mtk_pcm_hdmi_prepare 16bit, mHdmi_display_control =%d\n ", mHdmi_display_control);
 
 			SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_HDMI,
 						     AFE_WLEN_16_BIT);
 			SetHDMIdatalength(Soc_Aud_I2S_WLEN_WLEN_16BITS);
 			SetTDMDatalength(Soc_Aud_I2S_WLEN_WLEN_16BITS);
-			SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_16BITS);
-			Tdm_Lrck = ((Soc_Aud_I2S_WLEN_WLEN_16BITS + 1) * 16) - 1;
 
-			SetCLkBclk(MclkDiv, runtime->rate, runtime->channels,
-				   Soc_Aud_I2S_WLEN_WLEN_16BITS);
+			if (mHdmi_display_control == 1) {
+				SetCLkBclk(MclkDiv, runtime->rate, _ANX7805_SLIMPORT_CHANNEL,
+					   Soc_Aud_I2S_WLEN_WLEN_32BITS);
+				Tdm_Lrck = ((Soc_Aud_I2S_WLEN_WLEN_32BITS + 1) * 16) - 1;
+			} else {
+				SetCLkBclk(MclkDiv, runtime->rate, runtime->channels,
+					   Soc_Aud_I2S_WLEN_WLEN_16BITS);
+				Tdm_Lrck = ((Soc_Aud_I2S_WLEN_WLEN_16BITS + 1) * 16) - 1;
+			}
 			SetTDMLrckWidth(Tdm_Lrck);
-			SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_16BITS);
-			SetTDMChannelsSdata(runtime->channels);	/* notify data pin */
+
+			if (mHdmi_display_control == 1) {
+				SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_32BITS);
+				SetTDMChannelsSdata(_ANX7805_SLIMPORT_CHANNEL);	/* ANX7805 only I2s  */
+			} else {
+				SetTDMbckcycle(Soc_Aud_I2S_WLEN_WLEN_16BITS);
+				SetTDMChannelsSdata(runtime->channels);	/* notify data pin */
+			}
+
 
 			SetTDMDatalength(Soc_Aud_I2S_WLEN_WLEN_16BITS);
-/*            SetTDMLrckInverse(true);*/
+			/*SetTDMLrckInverse(true);*/
 			SetTDMBckInverse(false);
 		}
 
@@ -810,24 +865,39 @@ static int mtk_pcm_hdmi_prepare(struct snd_pcm_substream *substream)
 #endif
 		SetTDMI2Smode(Soc_Aud_I2S_FORMAT_I2S);
 
-		Afe_Set_Reg(AFE_TDM_CON2, 0, 0x0000000f);	/*  0: Channel starts from O30/O31. */
-		Afe_Set_Reg(AFE_TDM_CON2, 4 << 4, 0x000000f0);	/* tmp    1: Channel 0 */
-		Afe_Set_Reg(AFE_TDM_CON2, 4 << 8, 0x00000f00);	/* tmp    2: Channel 0. */
-		Afe_Set_Reg(AFE_TDM_CON2, 4 << 12, 0x0000f000);	/* tmp    3: Channel 0. */
-		Afe_Set_Reg(AUDIO_TOP_CON3, 1 << 3, 1 << 3);	/*  inverse HDMI BCLK */
-/*        Afe_Set_Reg(AFE_MEMIF_MAXLEN, 2 << 24,  0x0f000000); // 64-byte burst
-	  Afe_Set_Reg(AFE_MEMIF_MAXLEN, 0x11111115,  0xffffffff); // 64-byte burst*/
+		if (mHdmi_display_control == 1) {
+			Afe_Set_Reg(AFE_TDM_CON2, 0, 0x0000000f);	/*  0: Channel starts from O30/O31. */
+			Afe_Set_Reg(AFE_TDM_CON2, 1 << 4, 0x000000f0);	/*     1: Channel O32/O33 */
+			Afe_Set_Reg(AFE_TDM_CON2, 2 << 8, 0x00000f00);	/*     2: Channel O34/O35 */
+			Afe_Set_Reg(AFE_TDM_CON2, 3 << 12, 0x0000f000);	/*     3: Channel O67/O37 */
+		} else {
+			Afe_Set_Reg(AFE_TDM_CON2, 0, 0x0000000f);	/*  0: Channel starts from O30/O31. */
+			Afe_Set_Reg(AFE_TDM_CON2, 4 << 4, 0x000000f0);	/*     1: Channel 0 */
+			Afe_Set_Reg(AFE_TDM_CON2, 4 << 8, 0x00000f00);	/*     2: Channel 0. */
+			Afe_Set_Reg(AFE_TDM_CON2, 4 << 12, 0x0000f000);	/*     3: Channel 0. */
+		}
+		Afe_Set_Reg(AUDIO_TOP_CON3, 1 << 3, 1 << 3);
+		/*Afe_Set_Reg(AFE_MEMIF_MAXLEN, 2 << 24,  0x0f000000); // 64-byte burst
+		Afe_Set_Reg(AFE_MEMIF_MAXLEN, 0x11111115,  0xffffffff); // 64-byte burst*/
 
-/*follow CEA861E (0x13)*/
+		/*follow CEA861E (0x13)*/
 
 		SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I30,
 				  Soc_Aud_InterConnectionOutput_O30);
 		SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I31,
 				  Soc_Aud_InterConnectionOutput_O31);
-		SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I32,
-			Soc_Aud_InterConnectionOutput_O33);	/* O33 center */
-		SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I33,
-			Soc_Aud_InterConnectionOutput_O32);	/* O32 LFE */
+
+		if (mHdmi_display_control == 1) {
+			SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I32,
+				Soc_Aud_InterConnectionOutput_O32);
+			SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I33,
+				Soc_Aud_InterConnectionOutput_O33);
+		} else {
+			SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I32,
+				Soc_Aud_InterConnectionOutput_O33);	/* O33 center */
+			SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I33,
+				Soc_Aud_InterConnectionOutput_O32);	/* O32 LFE */
+		}
 		SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I34,
 				  Soc_Aud_InterConnectionOutput_O34);
 		SetHDMIConnection(Soc_Aud_InterCon_Connection, Soc_Aud_InterConnectionInput_I35,
@@ -872,6 +942,12 @@ static int mtk_pcm_hdmi_start(struct snd_pcm_substream *substream)
 	kal_uint32 volatile u4tmpValue;
 	kal_uint32 volatile u4tmpValue1;
 	kal_uint32 volatile u4tmpValue2;
+	kal_uint32 volatile u4tmpClkdiv0;
+	kal_uint32 volatile u4tmpClkdiv1;
+	kal_uint32 volatile u4tmpClkdiv2;
+	kal_uint32 volatile u4tmpHDMode;
+	kal_uint32 volatile u4tmpHDAlign;
+
 	/* uint32 u32AudioI2S = 0; */
 
 	SetMemifSubStream(Soc_Aud_Digital_Block_MEM_HDMI, substream);
@@ -898,29 +974,39 @@ static int mtk_pcm_hdmi_start(struct snd_pcm_substream *substream)
 	copysinewavetohdmi(runtime->channels);
 #endif
 
-
+	/* here to set interrupt */
 	/* ALPS01889945 , stereo , multi channel switch A/V sync issue */
-	SetIrqMcuCounter(Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE, 1024);
 	/* 32bit , stereo , 64 BCK  for one count, (hal size)8192 bytes/(64/8) = 1024 count */
-	SetIrqEnable(Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE, true);
+	irq_add_user(substream,
+		     Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE,
+		     substream->runtime->rate,
+		     1024);
 
 	EnableAfe(true);
 
 	u4RegValue = Afe_Get_Reg(AFE_IRQ_MCU_STATUS);
-	u4RegValue &= 0xff;
+	u4RegValue &= 0xffffffff;
 
-	u4tmpValue = Afe_Get_Reg(AFE_HDMI_CONN0);
-	u4tmpValue &= 0xff;
+	u4tmpValue = Afe_Get_Reg(AFE_HDMI_OUT_CON0);
+	u4tmpValue &= 0xffffffff;
 
 	u4tmpValue1 = Afe_Get_Reg(AFE_TDM_CON1);
-	u4tmpValue1 &= 0x0003ffff;
+	u4tmpValue1 &= 0xffffffff;
 
 	u4tmpValue2 = Afe_Get_Reg(AFE_TDM_CON2);
-	u4tmpValue2 &= 0x0003ffff;
+	u4tmpValue2 &= 0xffffffff;
 
-	pr_debug
-	    ("[mtk_pcm_hdmi_start] IRQ_MCU_STATUS =0x%x, AFE_HDMI_CONN0= 0x%x, AFE_TDM_CON1=0x%x, AFE_TDM_CON2 =0x%x\n",
-	     u4RegValue, u4tmpValue, u4tmpValue1, u4tmpValue2);
+	u4tmpClkdiv0 = Afe_Get_Reg(CLK_AUDDIV_0);
+	u4tmpClkdiv1 = Afe_Get_Reg(CLK_AUDDIV_1);
+	u4tmpClkdiv2 = Afe_Get_Reg(CLK_AUDDIV_2);
+
+	u4tmpHDMode = Afe_Get_Reg(AFE_MEMIF_HD_MODE);
+	u4tmpHDAlign = Afe_Get_Reg(AFE_MEMIF_HDALIGN);
+
+	pr_warn
+	    ("%s IRQ =0x%x, CON0= 0x%x, CON1=0x%x, CON2 =0x%x,DIV0=0x%x,DIV1=0x%x,DIV2=0x%x,Mode=0x%x,Align=0x%x\n",
+	     __func__, u4RegValue, u4tmpValue, u4tmpValue1, u4tmpValue2,
+	     u4tmpClkdiv0, u4tmpClkdiv1, u4tmpClkdiv2, u4tmpHDMode, u4tmpHDAlign);
 
 	return 0;
 }

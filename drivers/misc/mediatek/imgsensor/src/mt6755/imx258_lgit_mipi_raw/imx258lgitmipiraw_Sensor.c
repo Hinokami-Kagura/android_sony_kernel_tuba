@@ -112,7 +112,7 @@ static imgsensor_info_struct imgsensor_info = {
 		.max_framerate = 300,//modify
 	},
 	.hs_video = {/*slow motion*/
-		.pclk = 518400000,//480000000,//518400000,
+		.pclk = 518400000,//480000000,
 		.linelength = 5352,
 		.framelength = 812,//746,//806,
 		.startx = 0,
@@ -544,7 +544,6 @@ static void load_imx258_SPC_Data(void)
 	}
 }
 
-//#if 0
 static void set_dummy(void)
 {
     LOG_INF("dummyline = %d, dummypixels = %d \n", imgsensor.dummy_line, imgsensor.dummy_pixel);
@@ -558,7 +557,6 @@ static void set_dummy(void)
 
 	write_cmos_sensor(0x0104, 0x00);
 }
-//#endif
 
 static kal_uint32 return_sensor_id(void)
 {
@@ -573,7 +571,7 @@ static kal_uint32 return_sensor_id(void)
 			 {
 			 	 imx258_type = read_cmos_sensor(0x0A2E);
 				 LOG_INF("imx258 type = 0x%x(0x00=HDR,0x10=binning)", imx258_type);
-				 return (kal_uint16)(((read_cmos_sensor(0x0A26) << 4) | (read_cmos_sensor(0x0A27) >> 4))+1);
+				 return (kal_uint16)(((read_cmos_sensor(0x0A26) << 4) | (read_cmos_sensor(0x0A27) >> 4))+(IMX258_LGIT_SENSOR_ID - IMX258_SENSOR_ID));
 			 }
 		}
 	}
@@ -612,15 +610,15 @@ static void set_max_framerate(UINT16 framerate,kal_bool min_framelength_en)
 
 
 static void set_shutter(unsigned long long shutter)
-{	
-	int longexposure_times =0;
+{
+	int longexposure_times = 0;
 	kal_uint32 framelength1 = read_cmos_sensor(0x0340);
 	kal_uint32 framelength2 = read_cmos_sensor(0x3041);
-	unsigned long long count_shutter=shutter;
+	unsigned long long count_shutter = shutter;
 	unsigned long flags;
 	kal_uint16 realtime_fps = 0;
 
-    LOG_INF("lxd:Enter! shutter =%lld\n", shutter);	
+    LOG_INF("lxd:Enter! shutter=%lld\n", shutter);
 	while(count_shutter>0xFFF0)
 	{
 		count_shutter =count_shutter/2;
@@ -630,24 +628,21 @@ static void set_shutter(unsigned long long shutter)
 	{
 		// Update Shutter
 		//shutter = 0xFFF0;
-		write_cmos_sensor(0x0104, 0x01);		
+		write_cmos_sensor(0x0104, 0x01);
 		write_cmos_sensor(0x0202, (count_shutter >> 8) & 0xFF);
-		write_cmos_sensor(0x0203, count_shutter  & 0xFF);			  
-			
-		write_cmos_sensor(0x0350, 0x01);	
+		write_cmos_sensor(0x0203, count_shutter  & 0xFF);
+
+		write_cmos_sensor(0x0350, 0x01);
 		write_cmos_sensor(0x3002, longexposure_times & 0x07);
 		write_cmos_sensor(0x0340, 0xFF);
 		write_cmos_sensor(0x0341, 0xF0);
-		write_cmos_sensor(0x0104, 0x00);  
+		write_cmos_sensor(0x0104, 0x00);
 
-			
 		LOG_INF("lxd!--1 shutter =%lld, longexposure_times=%d,framelength1=%x,framelength2=%x\n", shutter,longexposure_times,
 			framelength1,framelength2);
-
 	}
 	else
 	{
-
 	    spin_lock_irqsave(&imgsensor_drv_lock, flags);
 	    imgsensor.shutter = shutter;
 	    spin_unlock_irqrestore(&imgsensor_drv_lock, flags);
@@ -990,7 +985,7 @@ static void imx258_ImageQuality_Setting(void)
 		write_cmos_sensor(0x7FCC,0x01);
 		write_cmos_sensor(0x7B78,0x00);
 
-		//modify at 2015/10/21
+//added at 2015/10/21
 		write_cmos_sensor(0x9401,0x35);
 		write_cmos_sensor(0x9403,0x23);
 		write_cmos_sensor(0x9405,0x23);
@@ -1122,6 +1117,14 @@ static void imx258_ImageQuality_Setting(void)
 		write_cmos_sensor(0x9250,0x50);
 		write_cmos_sensor(0x9251,0x3C);
 		write_cmos_sensor(0x9252,0x14);
+		write_cmos_sensor(0x94DC,0x20);
+		write_cmos_sensor(0x94DD,0x20);
+		write_cmos_sensor(0x94DE,0x20);
+		write_cmos_sensor(0x95DC,0x20);
+		write_cmos_sensor(0x95DD,0x20);
+		write_cmos_sensor(0x95DE,0x20);
+		write_cmos_sensor(0x7FB0,0x00);
+		write_cmos_sensor(0x9010,0x3E);
 	}
 	else if(imx258_type == IMX258_BINNING_TYPE)
 	{
@@ -1420,9 +1423,11 @@ static void sensor_init(void)
 
 	load_imx258_SPC_Data();
 	write_cmos_sensor(0x7BC8,0x01);
+
 	write_cmos_sensor(0x7BC9,0x01);
 	write_cmos_sensor(0x0B05,0x01);//BPC
 	write_cmos_sensor(0x0B06,0x01);
+
 	write_cmos_sensor(0x0100,0x00);
 }	/*	sensor_init  */
 
@@ -1512,6 +1517,7 @@ static void preview_setting(void)
 	{
 		write_cmos_sensor(0x7BCD,0x01);
 	}
+
 	write_cmos_sensor(0x3030,0x00);
 	LOG_INF("0x3030=%d\n",read_cmos_sensor(0x3030));
 	write_cmos_sensor(0x3032,0x00);
@@ -1605,8 +1611,14 @@ static void capture_setting(kal_uint16 curretfps, kal_uint8  pdaf_mode)
 		write_cmos_sensor(0x020E,0x01);
 		write_cmos_sensor(0x020F,0x00);
 
-		write_cmos_sensor(0x7BCD,0x00);
-
+		if(imx258_type == IMX258_HDR_TYPE)
+		{
+			write_cmos_sensor(0x7BCD,0x00);
+		}
+		else if(imx258_type == IMX258_BINNING_TYPE)
+		{
+			write_cmos_sensor(0x7BCD,0x00);
+		}
 
 		if(pdaf_mode == 1) {
 			LOG_INF("read 0x3030\n");
@@ -1703,8 +1715,14 @@ static void capture_setting(kal_uint16 curretfps, kal_uint8  pdaf_mode)
 		write_cmos_sensor(0x020E,0x01);
 		write_cmos_sensor(0x020F,0x00);
 
-		write_cmos_sensor(0x7BCD,0x00);
-
+		if(imx258_type == IMX258_HDR_TYPE)
+		{
+			write_cmos_sensor(0x7BCD,0x00);
+		}
+		else if(imx258_type == IMX258_BINNING_TYPE)
+		{
+			write_cmos_sensor(0x7BCD,0x00);
+		}
 
 		if(pdaf_mode == 1) {
 			LOG_INF("read 0x3030\n");
@@ -1802,8 +1820,14 @@ static void capture_setting(kal_uint16 curretfps, kal_uint8  pdaf_mode)
 		write_cmos_sensor(0x020E,0x01);
 		write_cmos_sensor(0x020F,0x00);
 
-		write_cmos_sensor(0x7BCD,0x00);
-
+		if(imx258_type == IMX258_HDR_TYPE)
+		{
+			write_cmos_sensor(0x7BCD,0x00);
+		}
+		else if(imx258_type == IMX258_BINNING_TYPE)
+		{
+			write_cmos_sensor(0x7BCD,0x00);
+		}
 
 		if(pdaf_mode == 1) {
 			LOG_INF("read 0x3030\n");
@@ -2142,15 +2166,15 @@ static void hs_video_setting(void)
 	write_cmos_sensor(0x0303,0x02);
 	write_cmos_sensor(0x0305,0x04);
 	write_cmos_sensor(0x0306,0x00);
-	write_cmos_sensor(0x0307,0xD8);//0xc8  //PLL_IVT_MPY[7:0]
+	write_cmos_sensor(0x0307,0xD8);//0xC8 //PLL_IVT_MPY[7:0]
 	write_cmos_sensor(0x0309,0x0A);
 	write_cmos_sensor(0x030B,0x01);
 	write_cmos_sensor(0x030D,0x02);
 	write_cmos_sensor(0x030E,0x00);
 	write_cmos_sensor(0x030F,0xD8);
 	write_cmos_sensor(0x0310,0x00);
-	write_cmos_sensor(0x0820,0x14);//0x12   //Output Date rate[31:24]
-	write_cmos_sensor(0x0821,0x40);//0xc0  //Output Date rate[23:16]
+	write_cmos_sensor(0x0820,0x14);//0x12 //Output Date rate[31:24]
+	write_cmos_sensor(0x0821,0x40);//0xC0 //Output Date rate[23:16]
 	write_cmos_sensor(0x0822,0x00);
 	write_cmos_sensor(0x0823,0x00);
 
@@ -2989,7 +3013,7 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 			*feature_para_len=4;
 			break;
 		case SENSOR_FEATURE_SET_ESHUTTER:
-			set_shutter((UINT16)*feature_data);
+			set_shutter(*feature_data);
 			break;
 		case SENSOR_FEATURE_SET_NIGHTMODE:
 			night_mode((BOOL) *feature_data);

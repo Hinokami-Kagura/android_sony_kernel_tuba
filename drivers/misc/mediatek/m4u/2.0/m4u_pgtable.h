@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef __M4U_PGTABLE_H__
 #define __M4U_PGTABLE_H__
 
@@ -143,15 +156,13 @@ static inline imu_pte_t *imu_largepage_start(imu_pte_t *pte)
 	return (imu_pte_t *) (round_down((unsigned long)pte, (16 * 4)));
 }
 
-static inline unsigned int m4u_calc_next_mva(unsigned int addr, unsigned int end, unsigned int size)
+static inline unsigned long long m4u_calc_next_mva(unsigned long long addr, unsigned long long end, unsigned int size)
 {
-	/* addr + size may equal 0x100000000 */
-	unsigned long long __boundary = ((unsigned long long)addr
-									+(unsigned long long)size)
-									&(~((unsigned long long)size-1));
-	unsigned long long min = min_t(unsigned long long, __boundary, (unsigned long long)end);
+	/* addr + size may equal 0x100000000*/
+	unsigned long long __boundary = (addr + (unsigned long long)size) & (~((unsigned long long)size-1));
+	unsigned long long min = min_t(unsigned long long, __boundary, end);
 
-	return (unsigned int)min;
+	return min;
 }
 
 #endif

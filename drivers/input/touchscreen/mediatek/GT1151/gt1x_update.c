@@ -350,6 +350,7 @@ int gt1x_update_prepare(char *filename)
 
 	retry = 5;
 	while (retry > 0) {
+		retry--;
 		update_info.buffer = kzalloc(1024 * 4, GFP_KERNEL);
 		if (update_info.buffer == NULL) {
 			GTP_ERROR("Alloc %d bytes memory fail.", 1024 * 4);
@@ -1249,3 +1250,4 @@ int gt1x_startup_patch(void)
 
 	return ret;
 }
+MODULE_LICENSE("GPL");

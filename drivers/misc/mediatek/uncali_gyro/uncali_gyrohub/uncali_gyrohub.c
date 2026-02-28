@@ -11,41 +11,17 @@
  *
  */
 
-#include <linux/interrupt.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
-#include <linux/irq.h>
-#include <linux/miscdevice.h>
-#include <asm/uaccess.h>
-#include <linux/delay.h>
-#include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kobject.h>
-#include <linux/earlysuspend.h>
-#include <linux/platform_device.h>
-#include <asm/atomic.h>
-
-#include <linux/hwmsensor.h>
-#include <linux/hwmsen_dev.h>
-#include <linux/sensors_io.h>
+#include <hwmsensor.h>
 #include "uncali_gyrohub.h"
 #include <uncali_gyro.h>
-#include <linux/hwmsen_helper.h>
-
-#include <mach/mt_typedefs.h>
-#include <mach/mt_gpio.h>
-#include <mach/mt_pm_ldo.h>
-
-#include <linux/batch.h>
 #include <SCP_sensorHub.h>
 #include <linux/notifier.h>
 #include "scp_helper.h"
 
-
 #define UNGYROHUB_TAG                  "[uncali_gyrohub] "
-#define UNGYROHUB_FUN(f)               printk(UNGYROHUB_TAG"%s\n", __func__)
-#define UNGYROHUB_ERR(fmt, args...)    printk(UNGYROHUB_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
-#define UNGYROHUB_LOG(fmt, args...)    printk(UNGYROHUB_TAG fmt, ##args)
+#define UNGYROHUB_FUN(f)               pr_debug(UNGYROHUB_TAG"%s\n", __func__)
+#define UNGYROHUB_ERR(fmt, args...)    pr_err(UNGYROHUB_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
+#define UNGYROHUB_LOG(fmt, args...)    pr_debug(UNGYROHUB_TAG fmt, ##args)
 
 typedef enum {
 	UNGYROHUB_TRC_INFO = 0X10,
@@ -138,12 +114,16 @@ static int uncali_gyro_get_data(int *dat, int *offset, int *status)
 	}
 	time_stamp				= data.time_stamp;
 	time_stamp_gpt			= data.time_stamp_gpt;
-	dat[0] = data.uncalibrated_gyro_t.x_uncali;
-	dat[1] = data.uncalibrated_gyro_t.y_uncali;
-	dat[2] = data.uncalibrated_gyro_t.z_uncali;
+	dat[0] = data.uncalibrated_gyro_t.x;
+	dat[1] = data.uncalibrated_gyro_t.y;
+	dat[2] = data.uncalibrated_gyro_t.z;
 	offset[0] = data.uncalibrated_gyro_t.x_bias;
 	offset[1] = data.uncalibrated_gyro_t.y_bias;
 	offset[2] = data.uncalibrated_gyro_t.z_bias;
+	*status = data.uncalibrated_gyro_t.status;
+	/*UNGYROHUB_ERR("x:%d,y:%d,z:%d,x_bias:%d,ybias:%d,z_bias:%d,status:%d\n", dat[0],
+			dat[1], dat[2], offset[0], offset[1],
+			offset[2], *status);*/
 	return 0;
 }
 static int uncali_gyro_open_report_data(int open)
@@ -175,8 +155,8 @@ static int uncali_gyrohub_local_init(void)
 	ctl.open_report_data = uncali_gyro_open_report_data;
 	ctl.enable_nodata = uncali_gyro_enable_nodata;
 	ctl.set_delay = uncali_gyro_set_delay;
-	ctl.is_report_input_direct = false;
-	ctl.is_support_batch = true;
+	ctl.is_report_input_direct = true;
+	ctl.is_support_batch = false;
 	err = uncali_gyro_register_control_path(&ctl);
 	if (err) {
 		UNGYROHUB_ERR("register uncali_gyro control path err\n");
@@ -184,10 +164,16 @@ static int uncali_gyrohub_local_init(void)
 	}
 
 	data.get_data = uncali_gyro_get_data;
+	data.vender_div = 7506;
 	err = uncali_gyro_register_data_path(&data);
 	if (err) {
 		UNGYROHUB_ERR("register uncali_gyro data path err\n");
 		goto exit;
+	}
+	err = batch_register_support_info(ID_GYROSCOPE_UNCALIBRATED, ctl.is_support_batch, data.vender_div, 1);
+	if (err) {
+		UNGYROHUB_ERR("register gsensor batch support err = %d\n", err);
+		goto exit_create_attr_failed;
 	}
 	return 0;
 exit:

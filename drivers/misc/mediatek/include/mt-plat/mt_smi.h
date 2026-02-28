@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _MTK_SMI_H_
 #define _MTK_SMI_H_
 
@@ -34,6 +47,8 @@ typedef enum {
 	SMI_BWC_SCEN_VR,
 	SMI_BWC_SCEN_SWDEC_VP,
 	SMI_BWC_SCEN_VP,
+	SMI_BWC_SCEN_VP_HIGH_FPS,
+	SMI_BWC_SCEN_VP_HIGH_RESOLUTION,
 	SMI_BWC_SCEN_VR_SLOW,
 	SMI_BWC_SCEN_MM_GPU,
 	SMI_BWC_SCEN_WFD,
@@ -57,6 +72,7 @@ typedef enum {
 	MMDVFS_VOLTAGE_1,
 	MMDVFS_VOLTAGE_HIGH = MMDVFS_VOLTAGE_1,
 	MMDVFS_VOLTAGE_DEFAULT_STEP,
+	MMDVFS_VOLTAGE_LOW_LOW,
 	MMDVFS_VOLTAGE_COUNT
 } mmdvfs_voltage_enum;
 
@@ -93,7 +109,9 @@ typedef struct {
 	unsigned int sensor_size;
 	unsigned int sensor_fps;
 	unsigned int camera_mode;
-
+	unsigned int boost_disable;
+	unsigned int ddr_type;
+	unsigned int step;
 	unsigned int venc_size;
 
 	unsigned int ret;
@@ -101,6 +119,9 @@ typedef struct {
 
 #define MTK_MMDVFS_CMD_TYPE_SET		0
 #define MTK_MMDVFS_CMD_TYPE_QUERY	1
+#define MTK_MMDVFS_CMD_TYPE_GET	2
+#define MTK_MMDVFS_CMD_TYPE_CONFIG	3
+#define MTK_MMDVFS_CMD_TYPE_STEP_SET 4
 
 typedef enum {
 	SMI_BWC_INFO_CON_PROFILE = 0,

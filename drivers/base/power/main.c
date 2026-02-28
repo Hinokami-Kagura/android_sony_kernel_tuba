@@ -400,136 +400,102 @@ static void dpm_show_time(ktime_t starttime, pm_message_t state, char *info)
 }
 
 #ifdef CONFIG_PM_WAKEUP_TIMES
-static void dpm_log_wakeup_stats(pm_message_t state, ktime_t *start_time,
-        struct stats_wakeup_time *min_time,
-        struct stats_wakeup_time *max_time,
-        struct stats_wakeup_time *last_time,
-        ktime_t *avg_time)
+void dpm_log_start_time(pm_message_t state)
 {
-    ktime_t end_time, duration, prev_duration, sum;
-    struct stats_wakeup_time prev;
-    u64 avg_ns;
-    char buf[32] = {0};
-    unsigned int nr = 0;
-
-    if (!ktime_to_ns(*start_time))
-        return;
-
-    switch (state.event) {
-    case PM_EVENT_RESUME:
-        snprintf(buf, sizeof(buf), "%s", "resume time:");
-        break;
-    case PM_EVENT_SUSPEND:
-        snprintf(buf, sizeof(buf), "%s", "suspend time:");
-        break;
-    default:
-        return;
-    }
-
-    end_time = ktime_get_boottime();
-    prev = *last_time;
-    prev_duration = ktime_sub(prev.end, prev.start);
-    last_time->end = end_time;
-    last_time->start = *start_time;
-    duration = ktime_sub(end_time, *start_time);
-    if (ktime_compare(duration,
-        ktime_sub(max_time->end, max_time->start)) > 0)
-        *max_time = *last_time;
-
-    if (!ktime_to_ns(ktime_sub(min_time->end, min_time->start)))
-        *min_time = *last_time;
-
-    if (ktime_compare(duration,
-        ktime_sub(min_time->end, min_time->start)) < 0)
-        *min_time = *last_time;
-
-    if (ktime_to_ns(prev_duration))
-        nr++;
-
-    if (ktime_to_ns(*avg_time))
-        nr++;
-
-    sum = ktime_add(ktime_add(*avg_time, prev_duration), duration);
-    avg_ns = div_u64(ktime_to_ns(sum), (nr + 1));
-    *avg_time = ktime_set(0, avg_ns);
-    *start_time = ktime_set(0, 0);
-
-    pr_debug("%s\n%s  %llums\n%s  %llums\n %s  %llums\n%s %llums\n", buf,
-            "  min:",
-            ktime_to_ms(ktime_sub(min_time->end, min_time->start)),
-            "  max:",
-            ktime_to_ms(ktime_sub(max_time->end, max_time->start)),
-            "  last:", ktime_to_ms(duration),
-            "  avg:", ktime_to_ms(*avg_time));
-    suspend_stats_queue.resume_done = 1;
-    wake_up(&suspend_stats_queue.wait_queue);
+	switch (state.event) {
+	case PM_EVENT_RESUME:
+		resume_start_time = ktime_get();
+		break;
+	case PM_EVENT_SUSPEND:
+		suspend_start_time = ktime_get_boottime();
+		break;
+	default:
+		break;
+	}
 }
+EXPORT_SYMBOL_GPL(dpm_log_start_time);
 
-/**
- * log_resume_start - log resume start point.
- * @state: PM transition of the system being carried out.
- *
- */
-void log_resume_start(pm_message_t state)
+void dpm_log_wakeup_stats(pm_message_t state)
 {
-    if (state.event == PM_EVENT_RESUME)
-        resume_start_time = ktime_get_boottime();
+	ktime_t *start_time, *avg_time, end_time, duration, prev_duration, sum;
+	ktime_t resume_duration;
+	struct stats_wakeup_time *min_time, *max_time, *last_time, prev;
+	u64 avg_ns;
+	char buf[32] = {0};
+	unsigned int nr = 0;
+
+	switch (state.event) {
+	case PM_EVENT_RESUME:
+		snprintf(buf, sizeof(buf), "%s", "resume time:");
+		if (!ktime_to_ns(resume_start_time))
+			return;
+		resume_duration = ktime_sub(ktime_get(), resume_start_time);
+		resume_start_time = ktime_sub(ktime_get_boottime(), resume_duration);
+		start_time = &resume_start_time;
+		min_time = &suspend_stats.resume_min_time;
+		max_time = &suspend_stats.resume_max_time;
+		last_time = &suspend_stats.resume_last_time;
+		avg_time = &suspend_stats.resume_avg_time;
+		break;
+	case PM_EVENT_SUSPEND:
+		snprintf(buf, sizeof(buf), "%s", "suspend time:");
+		start_time = &suspend_start_time;
+		min_time = &suspend_stats.suspend_min_time;
+		max_time = &suspend_stats.suspend_max_time;
+		last_time = &suspend_stats.suspend_last_time;
+		avg_time = &suspend_stats.suspend_avg_time;
+		break;
+	default:
+		return;
+	}
+
+	if (!ktime_to_ns(*start_time))
+		return;
+
+	/* Calculate duration and update last time */
+	end_time = ktime_get_boottime();
+	prev = *last_time;
+	prev_duration = ktime_sub(prev.end, prev.start);
+	last_time->end = end_time;
+	last_time->start = *start_time;
+	duration = ktime_sub(end_time, *start_time);
+
+	/* Update max time */
+	if (ktime_compare(duration,
+		ktime_sub(max_time->end, max_time->start)) > 0)
+		*max_time = *last_time;
+
+	/* Update min time */
+	if (!ktime_to_ns(ktime_sub(min_time->end, min_time->start)))
+		*min_time = *last_time;
+
+	if (ktime_compare(duration,
+		ktime_sub(min_time->end, min_time->start)) < 0)
+		*min_time = *last_time;
+
+	/* Compute the avg of current, previous and previous average times */
+	if (ktime_to_ns(prev_duration))
+		nr++;
+
+	if (ktime_to_ns(*avg_time))
+		nr++;
+
+	sum = ktime_add(ktime_add(*avg_time, prev_duration), duration);
+	avg_ns = div_u64(ktime_to_ns(sum), (nr + 1));
+	*avg_time = ktime_set(0, avg_ns);
+	*start_time = ktime_set(0, 0);
+
+	pr_debug("%s\n%s  %llums\n%s  %llums\n %s  %llums\n%s %llums\n", buf,
+			"  min:",
+			ktime_to_ms(ktime_sub(min_time->end, min_time->start)),
+			"  max:",
+			ktime_to_ms(ktime_sub(max_time->end, max_time->start)),
+			"  last:", ktime_to_ms(duration),
+			"  avg:", ktime_to_ms(*avg_time));
+	suspend_stats_queue.resume_done = 1;
+	wake_up(&suspend_stats_queue.wait_queue);
 }
-EXPORT_SYMBOL_GPL(log_resume_start);
-
-/**
- * log_resume_end - log resume end point.
- * @state: PM transition of the system being carried out.
- *
- */
-void log_resume_end(pm_message_t state)
-{
-    if (state.event == PM_EVENT_RESUME) {
-        dpm_log_wakeup_stats(state, &resume_start_time,
-            &suspend_stats.resume_min_time,
-            &suspend_stats.resume_max_time,
-            &suspend_stats.resume_last_time,
-            &suspend_stats.resume_avg_time);
-    } else {
-        resume_start_time = ktime_set(0, 0);
-    }
-}
-EXPORT_SYMBOL_GPL(log_resume_end);
-
-/**
- * log_suspend_start - log suspend start point.
- * @state: PM transition of the system being carried out.
- *
- */
-int log_suspend_start(pm_message_t state)
-{
-    if (state.event == PM_EVENT_SUSPEND)
-        suspend_start_time = ktime_get_boottime();
-    return 0;
-}
-EXPORT_SYMBOL_GPL(log_suspend_start);
-
-/**
- * log_suspend_end - log suspend end point.
- * @state: PM transition of the system being carried out.
- *
- */
-int log_suspend_end(pm_message_t state)
-{
-    if (state.event == PM_EVENT_SUSPEND) {
-        dpm_log_wakeup_stats(state, &suspend_start_time,
-            &suspend_stats.suspend_min_time,
-            &suspend_stats.suspend_max_time,
-            &suspend_stats.suspend_last_time,
-            &suspend_stats.suspend_avg_time);
-    } else {
-        suspend_start_time = ktime_set(0, 0);
-    }
-
-    return 0;
-}
-EXPORT_SYMBOL_GPL(log_suspend_end);
-
+EXPORT_SYMBOL_GPL(dpm_log_wakeup_stats);
 #endif
 
 static int dpm_run_callback(pm_callback_t cb, struct device *dev,
@@ -1161,7 +1127,6 @@ void dpm_resume_end(pm_message_t state)
 {
 	dpm_resume(state);
 	dpm_complete(state);
-
 }
 EXPORT_SYMBOL_GPL(dpm_resume_end);
 
@@ -1438,14 +1403,15 @@ int dpm_suspend_late(pm_message_t state)
 		error = device_suspend_late(dev);
 
 		mutex_lock(&dpm_list_mtx);
+		if (!list_empty(&dev->power.entry))
+			list_move(&dev->power.entry, &dpm_late_early_list);
+
 		if (error) {
 			pm_dev_err(dev, state, " late", error);
 			dpm_save_failed_dev(dev_name(dev));
 			put_device(dev);
 			break;
 		}
-		if (!list_empty(&dev->power.entry))
-			list_move(&dev->power.entry, &dpm_late_early_list);
 		put_device(dev);
 
 		if (async_error)

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -65,7 +78,14 @@ void mt_ppm_dlpt_kick_PBM(struct ppm_cluster_status *cluster_status, unsigned in
 		max_volt = MAX(max_volt, cluster_status[i].volt);
 	}
 #if PPM_DLPT_ENHANCEMENT
+
+#if PPM_HW_OCP_SUPPORT
+	budget = ppm_calc_total_power_by_ocp(cluster_status, cluster_num);
+	if (!budget)
+		budget = ppm_calc_total_power(cluster_status, cluster_num, DYNAMIC_TABLE2REAL_PERCENTAGE);
+#else
 	budget = ppm_calc_total_power(cluster_status, cluster_num, DYNAMIC_TABLE2REAL_PERCENTAGE);
+#endif
 	if (!budget)
 		goto end;
 
@@ -78,7 +98,13 @@ void mt_ppm_dlpt_kick_PBM(struct ppm_cluster_status *cluster_status, unsigned in
 		budget, power_idx, total_core, max_volt);
 
 #ifndef DISABLE_PBM_FEATURE
+#ifdef CONFIG_MTK_RAM_CONSOLE
+	aee_rr_rec_ppm_waiting_for_pbm(1);
 	kicker_pbm_by_cpu(budget, total_core, max_volt);
+	aee_rr_rec_ppm_waiting_for_pbm(0);
+#else
+	kicker_pbm_by_cpu(budget, total_core, max_volt);
+#endif
 #endif
 
 end:
@@ -150,15 +176,14 @@ static unsigned int ppm_dlpt_calc_trans_precentage(void)
 {
 	struct ppm_power_tbl_data power_table = ppm_get_power_table();
 	unsigned int max_pwr_idx = power_table.power_tbl[0].power_idx;
+	unsigned int max_real_power = get_max_real_power_by_segment(ppm_main_info.dvfs_tbl_type);
 
 	/* dvfs table is null means ppm doesn't know chip type now */
 	/* return 100 to make default ratio is 1 and check real ratio next time */
 	if (!ppm_main_info.cluster_info[0].dvfs_tbl)
 		return 100;
 
-	dlpt_percentage_to_real_power = (ppm_main_info.dvfs_tbl_type == DVFS_TABLE_TYPE_FY)
-		? (max_pwr_idx * 100 + (DLPT_MAX_REAL_POWER_FY - 1)) / DLPT_MAX_REAL_POWER_FY
-		: (max_pwr_idx * 100 + (DLPT_MAX_REAL_POWER_SB - 1)) / DLPT_MAX_REAL_POWER_SB;
+	dlpt_percentage_to_real_power = (max_pwr_idx * 100 + (max_real_power - 1)) / max_real_power;
 
 	return dlpt_percentage_to_real_power;
 }

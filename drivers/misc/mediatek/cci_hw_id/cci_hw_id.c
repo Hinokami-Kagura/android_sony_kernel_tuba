@@ -11,6 +11,10 @@
 #include <linux/gpio.h>
 #include "cci_hw_id.h"
 
+#ifdef CONFIG_SONY_S1_SUPPORT
+static unsigned int s1_bl_unlocked = 0;
+#endif
+
 /*
   bit 0 -- HW ID 1 (GPIO56)
   bit 1 -- HW ID 2 (GPIO57)
@@ -489,6 +493,43 @@ static const struct file_operations cci_lcmid_info_proc_fops = {
 	.release	= single_release,
 };
 
+#ifdef CONFIG_SONY_S1_SUPPORT
+static int __init get_s1_bl_unlocked_from_cmdline(char* cmdline)
+{
+	s1_bl_unlocked = 0;
+	if(cmdline == NULL || strlen(cmdline) == 0)
+	{
+		printk(KERN_WARNING "s1 bl_unlocked is empty\n");
+	}
+	else
+	{
+		s1_bl_unlocked= (unsigned int)simple_strtoul(cmdline, NULL, 10);
+	}
+	printk(KERN_INFO "s1_bl_unlocked  = %d\n", s1_bl_unlocked);
+
+	return 0;
+}
+__setup("s1_bl_unlocked=", get_s1_bl_unlocked_from_cmdline);
+
+static int s1_bl_unlocked_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", s1_bl_unlocked);
+	return 0;
+}
+
+static int s1_bl_unlocked_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, s1_bl_unlocked_proc_show, NULL);
+}
+
+static const struct file_operations s1_bl_unlocked_proc_fops = {
+	.open	= s1_bl_unlocked_proc_open,
+	.read	= seq_read,
+	.llseek	= seq_lseek,
+	.release	= single_release,
+};
+#endif
+
 static int __init cci_hw_id_init(void)
 {
 	
@@ -504,6 +545,10 @@ static int __init cci_hw_id_init(void)
 	// Mark add proc file for LCM ID
 	proc_create("cci_lcm_id",0,NULL,&cci_lcmid_info_proc_fops);
 	
+	#ifdef CONFIG_SONY_S1_SUPPORT
+	proc_create("s1_bl_unlocked",0,NULL,&s1_bl_unlocked_proc_fops);
+	#endif
+
 	return err;
 }
 

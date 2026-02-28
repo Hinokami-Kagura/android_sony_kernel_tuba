@@ -30,7 +30,8 @@
 /*
  * CONFIG - compile time
  */
-#define HPS_TASK_PRIORITY                   (MAX_RT_PRIO - 3)
+#define HPS_TASK_RT_PRIORITY                   (MAX_RT_PRIO - 3)
+#define HPS_TASK_NORMAL_PRIORITY                   (MIN_NICE)
 #define HPS_TIMER_INTERVAL_MS               (40)
 
 #define HPS_PERIODICAL_BY_WAIT_QUEUE        (1)
@@ -320,7 +321,7 @@ extern int hps_cpu_is_cpu_little(int cpu);
 extern unsigned int hps_cpu_get_percpu_load(int cpu);
 extern unsigned int hps_cpu_get_nr_heavy_task(void);
 extern void hps_cpu_get_tlp(unsigned int *avg, unsigned int *iowait_avg);
-
+int get_suspend_status(void);
 /*=============================================================*/
 /* End */
 /*=============================================================*/

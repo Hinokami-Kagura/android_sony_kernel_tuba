@@ -139,7 +139,8 @@ uint8_t reGetI2cAddress(uint8_t device_ID)
 
 struct i2c_client *mClient = NULL;
 unsigned int mhl_eint_number = 0xffff;
-unsigned int mhl_eint_gpio_number = 140;
+unsigned int mhl_eint_gpio_number = 132;
+static unsigned int mask_flag = 0;
 
 extern wait_queue_head_t mhl_irq_wq;
 extern atomic_t mhl_irq_event ;
@@ -153,16 +154,21 @@ int get_mhl_irq_num(void)
 
 void Mask_Slimport_Intr(bool irq_context)
 {
-	SLIMPORT_DBG("Mask_Slimport_Intr, enable\n");
+	SLIMPORT_DBG("Mask_Slimport_Intr: in\n");
 #ifdef CONFIG_MTK_LEGACY
 #ifdef CUST_EINT_MHL_NUM
 	mt_eint_mask(CUST_EINT_MHL_NUM);
 #endif	
 #else
-    if(irq_context)
-        disable_irq_nosync(get_mhl_irq_num());
-    else    
-        disable_irq(get_mhl_irq_num());
+	SLIMPORT_DBG("Mask_Slimport_Intr: mask_flag:%d\n", mask_flag);
+
+	if(mask_flag == 0) {
+		if(irq_context)
+			disable_irq_nosync(get_mhl_irq_num());
+		else	
+			disable_irq(get_mhl_irq_num());
+		mask_flag++;
+	}
 #endif  
 
 	return ;
@@ -170,13 +176,16 @@ void Mask_Slimport_Intr(bool irq_context)
 
 void Unmask_Slimport_Intr(void)
 {
-	SLIMPORT_DBG("Unmask_Slimport_Intr, enable\n");
+	SLIMPORT_DBG("Unmask_Slimport_Intr: mask_flag:%d\n", mask_flag);
 #ifdef CONFIG_MTK_LEGACY
 #ifdef CUST_EINT_MHL_NUM
 	mt_eint_unmask(CUST_EINT_MHL_NUM);
 #endif	
 #else	
-	enable_irq(get_mhl_irq_num());
+	if (mask_flag != 0) {
+		enable_irq(get_mhl_irq_num());
+		mask_flag = 0;
+	}
 #endif  
 }
 
@@ -228,7 +237,7 @@ void register_slimport_eint(void)
 		mhl_eint_number = irq_of_parse_and_map(node, 0);
 		SLIMPORT_DBG("mhl_eint_number, node %p-irq %d!!\n", node, get_mhl_irq_num());
 		/*irq_set_irq_type(mhl_eint_number,IRQ_TYPE_EDGE_RISING);*/
-		gpio_set_debounce(mhl_eint_gpio_number, 2000);    /*debounce time is microseconds*/
+		gpio_set_debounce(mhl_eint_gpio_number, 50000);    /*debounce time is microseconds*/
     	/*if(request_irq(mhl_eint_number, anx7805_cbl_det_isr, IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_ONESHOT, "mediatek,sii8348-hdmi", NULL))*/ ///IRQF_TRIGGER_LOW
     	if(request_irq(mhl_eint_number, anx7805_cbl_det_isr, IRQ_TYPE_LEVEL_HIGH, "mediatek,extd_dev", NULL))
     	{
@@ -262,8 +271,8 @@ char* dpi_gpio_name[32] = {
 "dpi_ck_def", "dpi_ck_cfg","dpi_de_def", "dpi_de_cfg","dpi_hsync_def", "dpi_hsync_cfg","dpi_vsync_def", "dpi_vsync_cfg"
 };
 
-char* i2s_gpio_name[6] ={
-"i2s_dat_def","i2s_dat_cfg","i2s_ws_def","i2s_ws_cfg","i2s_ck_def","i2s_ck_cfg"
+char* i2s_gpio_name[10] = {
+"i2s_dat_def","i2s_dat_cfg","i2s_dat1_def","i2s_dat1_cfg","i2s_dat2_def","i2s_dat2_cfg","i2s_ws_def","i2s_ws_cfg","i2s_ck_def","i2s_ck_cfg"
 };
 
 char* rst_gpio_name[2] ={
@@ -317,7 +326,7 @@ void i2s_gpio_ctrl(int enable)
     
     if(enable)
         offset = 1;
-    for(; offset < 6 ;)
+    for(; offset < 10 ;)
     {
 
         pin_state = pinctrl_lookup_state(mhl_pinctrl, i2s_gpio_name[offset]);
@@ -330,7 +339,6 @@ void i2s_gpio_ctrl(int enable)
         
         offset +=2;
     }
-
 }
 
 void mhl_power_ctrl(int enable)

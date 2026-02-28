@@ -252,6 +252,14 @@ static inline bool use_1G_block(unsigned long addr, unsigned long next,
 
 	if (((addr | next | phys) & ~PUD_MASK) != 0)
 		return false;
+#ifdef CONFIG_MTK_SVP
+	/*
+	 * SSVP will unmapping memory region which shared with kernel
+	 * and SVP to prevent illegal fetch of EMI MPU Violation.
+	 * Return false to make all memory become pmd mapping.
+	 */
+	return false;
+#endif
 
 	return true;
 }
@@ -433,6 +441,8 @@ static void __init map_mem(void)
 	for_each_memblock(memory, reg) {
 		phys_addr_t start = reg->base;
 		phys_addr_t end = start + reg->size;
+		mtk_memcfg_write_memory_layout_info(MTK_MEMCFG_MEMBLOCK_PHY,
+				"kernel", start, reg->size);
 		MTK_MEMCFG_LOG_AND_PRINTK(
 			"[PHY layout]kernel   :   0x%08llx - 0x%08llx (0x%llx)\n",
 			(unsigned long long)start,
@@ -461,14 +471,14 @@ static void __init map_mem(void)
 	}
 
 #ifdef CONFIG_CCI_KLOG
-/*
+
 	MTK_MEMCFG_LOG_AND_PRINTK(KERN_ALERT
 			"[PHY layout][klog]0x%08llX - 0x%08llX (0x%llX) : 0x%lX\n",
 			(unsigned long long)CCI_KLOG_START_ADDR_PHYSICAL, 
 			(unsigned long long)CCI_KLOG_START_ADDR_PHYSICAL + CCI_KLOG_SIZE - 1,
 			(unsigned long long)CCI_KLOG_SIZE,
 			(unsigned long)__phys_to_virt(CCI_KLOG_START_ADDR_PHYSICAL));
-*/
+
 	create_mapping((unsigned long long)CCI_KLOG_START_ADDR_PHYSICAL, (unsigned long)MSM_KLOG_BASE, (unsigned long long)CCI_KLOG_SIZE,PAGE_KERNEL);
 	cklc_set_memory_ready();
 #endif // #ifdef CONFIG_CCI_KLOG

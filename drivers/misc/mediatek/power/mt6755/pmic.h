@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _PMIC_SW_H_
 #define _PMIC_SW_H_
 
@@ -191,6 +204,12 @@ extern int mt_gpio_set_debounce(unsigned gpio, unsigned debounce);
 		.isUsedable = (use),	\
 	}
 
+struct mtk_regulator_vosel {
+	unsigned int def_sel; /*-- default vosel --*/
+	unsigned int cur_sel; /*-- current vosel --*/
+	bool restore;
+};
+
 struct mtk_regulator {
 	struct regulator_desc desc;
 	struct regulator_init_data init_data;
@@ -205,6 +224,8 @@ struct mtk_regulator {
 	const void *pvoltages;
 	bool isUsedable;
 	struct regulator *reg;
+	/*--- Add to record selector ---*/
+	struct mtk_regulator_vosel vosel;
 	int vsleep_en_saved;
 };
 

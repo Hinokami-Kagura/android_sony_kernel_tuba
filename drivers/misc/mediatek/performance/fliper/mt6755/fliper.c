@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/kallsyms.h>
@@ -108,6 +121,14 @@ void enable_total_fliper(int enable)
 	}
 }
 
+int disable_cg_fliper(void)
+{
+	fliper_debug = 1;
+	enable_cg_fliper(0);
+
+	return 0;
+}
+
 int cg_set_threshold(int bw1, int bw2)
 {
 	int lpm_threshold, hpm_threshold;
@@ -206,6 +227,9 @@ static ssize_t mt_fliper_write(struct file *filp, const char *ubuf,
 	unsigned long arg1, arg2;
 	char option[64], arg[10];
 	int i, j;
+
+	arg1 = 0;
+	arg2 = 0;
 
 	if (cnt >= sizeof(buf))
 		return -EINVAL;

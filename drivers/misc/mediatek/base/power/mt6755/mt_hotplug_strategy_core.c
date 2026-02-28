@@ -1,3 +1,16 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
+
 /**
 * @file    mt_hotplug_strategy_core.c
 * @brief   hotplug strategy(hps) - core
@@ -51,6 +64,7 @@
 /*============================================================================*/
 static unsigned long long hps_cancel_time;
 static ktime_t ktime;
+static DEFINE_SPINLOCK(idle_nb_lock);
 /*============================================================================*/
 /* Local function definition */
 /*============================================================================*/
@@ -59,7 +73,7 @@ static ktime_t ktime;
  */
 static int _hps_timer_callback(unsigned long data)
 {
-	/*hps_warn("_hps_timer_callback\n"); */
+/*        hps_warn("_hps_timer_callback\n");*/
 	if (hps_ctxt.tsk_struct_ptr)
 		wake_up_process(hps_ctxt.tsk_struct_ptr);
 	return HRTIMER_NORESTART;
@@ -72,6 +86,30 @@ static long int hps_get_current_time_ms(void)
 	do_gettimeofday(&t);
 	return ((t.tv_sec & 0xFFF) * 1000000 + t.tv_usec) / 1000;
 }
+
+#if 1
+/*Add idle callback function*/
+static int cpu_hotplug_idle_notifier(struct notifier_block *nb,
+			unsigned long val,
+			void *data)
+{
+	if ((val == IDLE_END) && (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_TIMER)) {
+		spin_lock(&idle_nb_lock);
+		if ((hps_get_current_time_ms() - hps_cancel_time) >= HPS_TIMER_INTERVAL_MS) {
+			hps_task_wakeup_nolock();
+			hps_cancel_time = hps_get_current_time_ms();
+		/*	hps_warn("[AT]CPU hotplug idle notifier[Timeout]!!!\n");*/
+		}
+		spin_unlock(&idle_nb_lock);
+	}
+/*	hps_warn("[AT]CPU hotplug idle notifier!!![0x%x]\n",IDLE_END);*/
+	return 0;
+}
+
+static struct notifier_block cpu_hotplug_idle_nb = {
+	.notifier_call = cpu_hotplug_idle_notifier,
+};
+#endif
 
 static void hps_get_sysinfo(void)
 {
@@ -143,6 +181,12 @@ static int _hps_task_main(void *data)
 		/* policy = cpufreq_cpu_get(0); */
 		/* dbs_freq_increase(policy, policy->max); */
 		/* cpufreq_cpu_put(policy); */
+
+		/*Add for update time value of deferrable timer*/
+		spin_lock(&idle_nb_lock);
+		hps_cancel_time = hps_get_current_time_ms();
+		spin_unlock(&idle_nb_lock);
+
 #ifdef CONFIG_CPU_ISOLATION
 		if (hps_ctxt.wake_up_by_fasthotplug) {
 
@@ -180,6 +224,7 @@ HPS_WAIT_EVENT:
 					   atomic_read(&hps_ctxt.is_ondemand) != 0,
 					   msecs_to_jiffies(HPS_TIMER_INTERVAL_MS));
 		} else if (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_TIMER) {
+			hps_cancel_time = hps_get_current_time_ms();
 			if (atomic_read(&hps_ctxt.is_ondemand) == 0) {
 				mod_timer(&hps_ctxt.tmr_list,
 					  (jiffies + msecs_to_jiffies(HPS_TIMER_INTERVAL_MS)));
@@ -187,7 +232,6 @@ HPS_WAIT_EVENT:
 				schedule();
 			}
 		} else if (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_HR_TIMER) {
-
 			hrtimer_cancel(&hps_ctxt.hr_timer);
 			hrtimer_start(&hps_ctxt.hr_timer, ktime, HRTIMER_MODE_REL);
 			set_current_state(TASK_INTERRUPTIBLE);
@@ -211,14 +255,14 @@ HPS_WAIT_EVENT:
  */
 int hps_task_start(void)
 {
-	struct sched_param param = {.sched_priority = HPS_TASK_PRIORITY };
-
 	if (hps_ctxt.tsk_struct_ptr == NULL) {
+		/*struct sched_param param = {.sched_priority = HPS_TASK_PRIORITY };*/
 		hps_ctxt.tsk_struct_ptr = kthread_create(_hps_task_main, NULL, "hps_main");
 		if (IS_ERR(hps_ctxt.tsk_struct_ptr))
 			return PTR_ERR(hps_ctxt.tsk_struct_ptr);
 
-		sched_setscheduler_nocheck(hps_ctxt.tsk_struct_ptr, SCHED_FIFO, &param);
+	/*	sched_setscheduler_nocheck(hps_ctxt.tsk_struct_ptr, SCHED_FIFO, &param);*/
+		set_user_nice(hps_ctxt.tsk_struct_ptr, HPS_TASK_NORMAL_PRIORITY);
 		get_task_struct(hps_ctxt.tsk_struct_ptr);
 		wake_up_process(hps_ctxt.tsk_struct_ptr);
 		hps_warn("hps_task_start success, ptr: %p, pid: %d\n", hps_ctxt.tsk_struct_ptr,
@@ -306,8 +350,11 @@ int hps_core_init(void)
 
 	hps_warn("hps_core_init\n");
 	if (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_TIMER) {
+		idle_notifier_register(&cpu_hotplug_idle_nb);
+		hps_warn("hps_core_init: register idle nb done\n");
 		/*init timer */
-		init_timer(&hps_ctxt.tmr_list);
+		/*init_timer(&hps_ctxt.tmr_list);*/
+		init_timer_deferrable(&hps_ctxt.tmr_list);
 		/*init_timer_deferrable(&hps_ctxt.tmr_list); */
 		hps_ctxt.tmr_list.function = (void *)&_hps_timer_callback;
 		hps_ctxt.tmr_list.data = (unsigned long)&hps_ctxt;
@@ -357,12 +404,12 @@ int hps_core_deinit(void)
 int hps_del_timer(void)
 {
 #if 1
-	if (!hps_cancel_time)
-		hps_cancel_time = hps_get_current_time_ms();
 	if (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_TIMER) {
 		/*deinit timer */
-		del_timer_sync(&hps_ctxt.tmr_list);
+		/*del_timer_sync(&hps_ctxt.tmr_list);*/
 	} else if (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_HR_TIMER) {
+		if (!hps_cancel_time)
+			hps_cancel_time = hps_get_current_time_ms();
 		hrtimer_cancel(&hps_ctxt.hr_timer);
 	}
 #endif
@@ -371,44 +418,23 @@ int hps_del_timer(void)
 
 int hps_restart_timer(void)
 {
-#if 1
-	unsigned long long time_differ = 0;
-
-	time_differ = hps_get_current_time_ms() - hps_cancel_time;
 	if (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_TIMER) {
-		/*init timer */
-		init_timer(&hps_ctxt.tmr_list);
-		/*init_timer_deferrable(&hps_ctxt.tmr_list); */
-		hps_ctxt.tmr_list.function = (void *)&_hps_timer_callback;
-		hps_ctxt.tmr_list.data = (unsigned long)&hps_ctxt;
+		unsigned long long cancel_time;
 
-		if (time_differ >= HPS_TIMER_INTERVAL_MS) {
-			hps_ctxt.tmr_list.expires =
-			    jiffies + msecs_to_jiffies(HPS_TIMER_INTERVAL_MS);
-			add_timer(&hps_ctxt.tmr_list);
+		spin_lock(&idle_nb_lock);
+		cancel_time = hps_cancel_time;
+		spin_unlock(&idle_nb_lock);
+		if ((hps_get_current_time_ms() - cancel_time) >= HPS_TIMER_INTERVAL_MS)
 			hps_task_wakeup_nolock();
-			hps_cancel_time = 0;
-		} else {
-			hps_ctxt.tmr_list.expires =
-			    jiffies + msecs_to_jiffies(HPS_TIMER_INTERVAL_MS - time_differ);
-			add_timer(&hps_ctxt.tmr_list);
-		}
 	} else if (hps_ctxt.periodical_by == HPS_PERIODICAL_BY_HR_TIMER) {
-#if 1
 		hrtimer_start(&hps_ctxt.hr_timer, ktime, HRTIMER_MODE_REL);
-		if (time_differ >= HPS_TIMER_INTERVAL_MS) {
-			hps_task_wakeup_nolock();
-			hps_cancel_time = 0;
-		}
-#else
-		if (time_differ >= HPS_TIMER_INTERVAL_MS) {
-			/*init Hrtimer */
+		if ((hps_get_current_time_ms() - hps_cancel_time) >= HPS_TIMER_INTERVAL_MS) {
 			hrtimer_start(&hps_ctxt.hr_timer, ktime, HRTIMER_MODE_REL);
 			hps_task_wakeup_nolock();
-			hps_cancel_time = 0;
+			hps_cancel_time = hps_get_current_time_ms();
 		}
-#endif
 	}
-#endif
 	return 0;
 }
+
+

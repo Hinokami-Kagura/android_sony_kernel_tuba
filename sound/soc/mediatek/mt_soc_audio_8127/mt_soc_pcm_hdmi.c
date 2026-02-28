@@ -71,8 +71,6 @@ struct mt_pcm_hdmi_priv {
 static int32_t Previous_Hw_cur = 0;
 */
 
-static bool bHdmiPrepared;
-
 static int mHdmi_sidegen_control;
 static const char * const HDMI_SIDEGEN[] = { "Off", "On" };
 
@@ -150,11 +148,6 @@ static int mtk_pcm_hdmi_stop(struct snd_pcm_substream *substream)
 	mt_afe_hdmi_clk_off();
 
 	mt_afe_aplltuner_clk_off();
-#if 0
-	EnableSpdifDivPower(AUDIO_APLL_SPDIF_DIV, false);
-	EnableHDMIDivPower(AUDIO_APLL_HDMI_BCK_DIV, false);
-#endif
-	mt_afe_top_apll_clk_off();
 
 	Afe_Block->u4DMAReadIdx = 0;
 	Afe_Block->u4WriteIdx = 0;
@@ -317,7 +310,6 @@ static int mtk_pcm_hdmi_open(struct snd_pcm_substream *substream)
 
 	pr_debug("%s\n", __func__);
 
-	mt_afe_ana_clk_on();
 	mt_afe_emi_clk_on();
 	mt_afe_main_clk_on();
 
@@ -338,7 +330,7 @@ static int mtk_pcm_hdmi_open(struct snd_pcm_substream *substream)
 	}
 
 	/* print for hw pcm information */
-	pr_debug("%s, runtime->rate = %d, channels = %d, substream->pcm->device = %d\n",
+	pr_debug("%s, runtime->rate = %u, channels = %u, substream->pcm->device = %d\n",
 		__func__, runtime->rate, runtime->channels, substream->pcm->device);
 
 	runtime->hw.info |= SNDRV_PCM_INFO_INTERLEAVED;
@@ -353,21 +345,18 @@ static int mtk_pcm_hdmi_open(struct snd_pcm_substream *substream)
 
 static int mtk_pcm_hdmi_close(struct snd_pcm_substream *substream)
 {
-/*	struct snd_pcm_runtime *runtime = substream->runtime;*/
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct mt_pcm_hdmi_priv *priv = snd_soc_platform_get_drvdata(rtd->platform);
 
 	struct AFE_BLOCK_T *Afe_Block = &(pMemControl->rBlock);
 
-	if (bHdmiPrepared) {
-#if 0
-		EnableApllTuner(runtime->rate, false);
-		EnableApll(runtime->rate, false);
-#endif
-		bHdmiPrepared = false;
+	if (priv->prepared) {
+		mt_afe_top_apll_clk_off();
+		priv->prepared = false;
 	}
 
 	mt_afe_emi_clk_off();
 	mt_afe_main_clk_off();
-	mt_afe_ana_clk_off();
 
 	Afe_Block->u4DMAReadIdx = 0;
 	Afe_Block->u4WriteIdx = 0;
@@ -378,18 +367,26 @@ static int mtk_pcm_hdmi_close(struct snd_pcm_substream *substream)
 
 static int mtk_pcm_hdmi_prepare(struct snd_pcm_substream *substream)
 {
-/*	struct snd_pcm_runtime *runtime = substream->runtime;*/
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct mt_pcm_hdmi_priv *priv = snd_soc_platform_get_drvdata(rtd->platform);
 
-	pr_debug("%s\n", __func__);
+	pr_debug("%s rate = %u channels = %u period_size = %lu.\n",
+		__func__, runtime->rate, runtime->channels, runtime->period_size);
 
-	if (!bHdmiPrepared) {
-#if 0
-		EnableApll(runtime->rate, true);
-		EnableApllTuner(runtime->rate, true);
-#endif
+	if (!priv->prepared) {
+		set_hdmi_clock_source(runtime->rate);
+		mt_afe_top_apll_clk_on();
 
-		bHdmiPrepared = true;
+	} else if (priv->cached_sample_rate != runtime->rate) {
+		/* Must turn on pdn_apll before setting clk mux */
+		mt_afe_top_apll_clk_off();
+		/* enable audio clock */
+		set_hdmi_clock_source(runtime->rate);
+		mt_afe_top_apll_clk_on();
 	}
+	priv->prepared = true;
+	priv->cached_sample_rate = runtime->rate;
 
 	return 0;
 }
@@ -398,77 +395,12 @@ static int mtk_pcm_hdmi_prepare(struct snd_pcm_substream *substream)
 
 static int mtk_pcm_hdmi_start(struct snd_pcm_substream *substream)
 {
-#if 0
-
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	uint32_t mclkDiv;
-
-	pr_debug("[%s] runtime->rate = %d, runtime->channels = %d, runtime->period_size = %d\n",
-		__func__, runtime->rate, runtime->channels, (unsigned int)runtime->period_size);
-
-	set_memif_substream(Soc_Aud_Digital_Block_MEM_HDMI, substream);
-
-	/* HDMI I2S clock setting */
-	mclkDiv = SetCLkMclk(Soc_Aud_HDMI_MCK, runtime->rate);
-	SetCLkHdmiBclk(mclkDiv, runtime->rate, 2, 32);
-
-	/* enable mclk divider */
-	EnableSpdifDivPower(AUDIO_APLL_SPDIF_DIV, true);
-
-	/* enable bck divider */
-	EnableHDMIDivPower(AUDIO_APLL_HDMI_BCK_DIV, true);
-
-	/* turn on hdmi clk */
-	SetHdmiClkOn();
-
-	/* config hdmi irq */
-	mt_afe_set_irq_counter(Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE, runtime->period_size);
-
-	/* config hdmi interface */
-	if (runtime->format == SNDRV_PCM_FORMAT_S32_LE
-	    || runtime->format == SNDRV_PCM_FORMAT_U32_LE) {
-		SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_HDMI,
-					     AFE_WLEN_32_BIT_ALIGN_24BIT_DATA_8BIT_0);
-		mt_afe_set_reg(AFE_HDMI_OUT_CON0, 0x2, 0x2);
-	} else
-		SetMemIfFetchFormatPerSample(Soc_Aud_Digital_Block_MEM_HDMI, AFE_WLEN_16_BIT);
-
-
-	SetHdmiTdm2Config(runtime->channels);
-	SetHDMIChannels(runtime->channels);
-
-	/* config hdmi connection */
-	SetHdmiPcmInterConnection(Soc_Aud_InterCon_Connection, runtime->channels);
-
-	/* Enable hdmi Memory Path */
-	mt_afe_enable_memory_path(Soc_Aud_Digital_Block_MEM_HDMI);
-
-	/* enable irq */
-	mt_afe_set_irq_state(Soc_Aud_IRQ_MCU_MODE_IRQ5_MCU_MODE, true);
-
-	/* enable hdmi out */
-	SetHDMIEnable(true);
-
-	/* enable afe */
-	mt_afe_enable_afe(true);
-
-	pr_debug
-	("[%s] AFE_IRQ_MCU_STATUS = 0x%x AFE_IRQ_MCU_EN = 0x%x AFE_IRQ_MCU_CNT5=0x%x AFE_IRQ5_MCU_EN_CNT_MON =0x%x\n",
-	__func__, mt_afe_get_reg(AFE_IRQ_MCU_STATUS), mt_afe_get_reg(AFE_IRQ_MCU_EN),
-	mt_afe_get_reg(AFE_IRQ_MCU_CNT5), mt_afe_get_reg(AFE_IRQ5_MCU_EN_CNT_MON));
-#else
 	struct snd_pcm_runtime *runtime = substream->runtime;
 
-	pr_debug("%s period_size = %lu\n", __func__, runtime->period_size);
+	pr_debug("%s period_size = %lu,runtime->rate=%u,runtime->channels=%u\n",
+			__func__, runtime->period_size, runtime->rate, runtime->channels);
 
 	set_memif_substream(Soc_Aud_Digital_Block_MEM_HDMI, substream);
-
-    /* Must turn on pdn_apll before setting clk mux */
-	mt_afe_top_apll_clk_on();
-
-	/* enable audio clock */
-	mt_afe_main_clk_on();
-	set_hdmi_clock_source(get_sample_rate_index(runtime->rate));
 	mt_afe_aplltuner_clk_on();
 	mt_afe_hdmi_clk_on();
 
@@ -494,7 +426,6 @@ static int mtk_pcm_hdmi_start(struct snd_pcm_substream *substream)
 	mt_afe_enable_memory_path(Soc_Aud_Digital_Block_MEM_HDMI);/*	SetHdmiPathEnable(true);*/
 	mt_afe_enable_afe(true);
 
-#endif
 	return 0;
 }
 
@@ -521,8 +452,9 @@ static int mtk_pcm_hdmi_copy(struct snd_pcm_substream *substream,
 	int copy_size = 0, Afe_WriteIdx_tmp;
 	unsigned long flags;
 	char *data_w_ptr = (char *)dst;
+	struct snd_pcm_runtime *runtime = substream->runtime;
 
-	count = audio_frame_to_bytes(substream, count);
+	count = frames_to_bytes(runtime, count);
 
 	/* check which memif need to be write */
 	Afe_Block = &(pMemControl->rBlock);
@@ -695,20 +627,25 @@ static struct snd_soc_platform_driver mtk_hdmi_soc_platform = {
 
 static int mtk_hdmi_probe(struct platform_device *pdev)
 {
-	PRINTK_AUD_HDMI("%s\n", __func__);
+	struct device *dev = &pdev->dev;
+	struct mt_pcm_hdmi_priv *priv;
 
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
+	PRINTK_AUD_HDMI("%s dev name %s\n", __func__, dev_name(dev));
 
-	if (!pdev->dev.dma_mask)
-		pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
+	if (dev->of_node) {
+		dev_set_name(dev, "%s", MT_SOC_HDMI_PCM);
+		PRINTK_AUD_HDMI("%s set dev name %s\n", __func__, dev_name(dev));
+	}
 
-	if (pdev->dev.of_node)
-		dev_set_name(&pdev->dev, "%s", MT_SOC_HDMI_PCM);
+	priv = devm_kzalloc(dev, sizeof(struct mt_pcm_hdmi_priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
 
-	PRINTK_AUD_HDMI("%s: dev name %s\n", __func__, dev_name(&pdev->dev));
+	priv->cached_sample_rate = 44100;
 
+	dev_set_drvdata(dev, priv);
 
-	return snd_soc_register_platform(&pdev->dev, &mtk_hdmi_soc_platform);
+	return snd_soc_register_platform(dev, &mtk_hdmi_soc_platform);
 }
 
 static int mtk_asoc_pcm_hdmi_new(struct snd_soc_pcm_runtime *rtd)

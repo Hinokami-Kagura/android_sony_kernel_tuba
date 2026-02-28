@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -52,12 +65,15 @@
 #define BAT_LOG_FULL 2
 #define BAT_LOG_DEBG 3
 
+//CEI comment start//
 #define battery_xlog_printk(num, fmt, args...) \
 do {\
 	if (Enable_BATDRV_LOG >= (int)num) \
 		pr_err(fmt, ##args); \
 } while (0)
+//CEI comment end//
 
+//CEI comment start//
 #define battery_log(num, fmt, args...) \
 do { \
 	if (Enable_BATDRV_LOG >= (int)num) \
@@ -71,7 +87,7 @@ do { \
 			break; \
 		} \
 } while (0)
-
+//CEI comment end//
 
 /* ============================================================ */
 /* ENUM */
@@ -111,6 +127,23 @@ typedef enum {
 	CHARGING_CMD_GET_BIF_TBAT,
 	CHARGING_CMD_SET_TA20_RESET,
 	CHARGING_CMD_SET_TA20_CURRENT_PATTERN,
+	CHARGING_CMD_SET_DP,
+	CHARGING_CMD_GET_CHARGER_TEMPERATURE,
+	CHARGING_CMD_SET_BOOST_CURRENT_LIMIT,
+	CHARGING_CMD_ENABLE_OTG,
+	CHARGING_CMD_ENABLE_POWER_PATH,
+	CHARGING_CMD_GET_BIF_IS_EXIST,
+	CHARGING_CMD_GET_INPUT_CURRENT,
+	CHARGING_CMD_ENABLE_DIRECT_CHARGE,
+	CHARGING_CMD_GET_IS_POWER_PATH_ENABLE,
+	CHARGING_CMD_GET_IS_SAFETY_TIMER_ENABLE,
+	CHARGING_CMD_SET_PWRSTAT_LED_EN,
+	CHARGING_CMD_GET_IBUS,
+	CHARGING_CMD_GET_VBUS,
+	CHARGING_CMD_RESET_DC_WATCH_DOG_TIMER,
+	CHARGING_CMD_RUN_AICL,
+	CHARGING_CMD_SET_IRCMP_RESISTOR,
+	CHARGING_CMD_SET_IRCMP_VOLT_CLAMP,
 	CHARGING_CMD_SET_DEFAULT_DPM,
 	CHARGING_CMD_DUMP_REGISTER_GET_DATA,
 	CHARGING_CMD_NUMBER
@@ -268,22 +301,33 @@ typedef enum {
 	BATTERY_VOLT_03_740000_V = 3740000,
 	BATTERY_VOLT_03_750000_V = 3750000,
 	BATTERY_VOLT_03_760000_V = 3760000,
+	BATTERY_VOLT_03_762500_V = 3762500,
 	BATTERY_VOLT_03_775000_V = 3775000,
 	BATTERY_VOLT_03_780000_V = 3780000,
+	BATTERY_VOLT_03_787500_V = 3787500,
 	BATTERY_VOLT_03_800000_V = 3800000,
+	BATTERY_VOLT_03_812500_V = 3812500,
 	BATTERY_VOLT_03_820000_V = 3820000,
 	BATTERY_VOLT_03_825000_V = 3825000,
+	BATTERY_VOLT_03_837500_V = 3837500,
 	BATTERY_VOLT_03_840000_V = 3840000,
 	BATTERY_VOLT_03_850000_V = 3850000,
 	BATTERY_VOLT_03_860000_V = 3860000,
+	BATTERY_VOLT_03_862500_V = 3862500,
+	BATTERY_VOLT_03_875000_V = 3875000,
 	BATTERY_VOLT_03_880000_V = 3880000,
+	BATTERY_VOLT_03_887500_V = 3887500,
 	BATTERY_VOLT_03_900000_V = 3900000,
+	BATTERY_VOLT_03_912500_V = 3912500,
 	BATTERY_VOLT_03_920000_V = 3920000,
+	BATTERY_VOLT_03_925000_V = 3925000,
+	BATTERY_VOLT_03_937500_V = 3937500,
 	BATTERY_VOLT_03_940000_V = 3940000,
 	BATTERY_VOLT_03_950000_V = 3950000,
 	BATTERY_VOLT_03_960000_V = 3960000,
 	BATTERY_VOLT_03_975000_V = 3975000,
 	BATTERY_VOLT_03_980000_V = 3980000,
+	BATTERY_VOLT_03_987500_V = 3987500,
 	BATTERY_VOLT_04_000000_V = 4000000,
 	BATTERY_VOLT_04_012500_V = 4012500,
 	BATTERY_VOLT_04_020000_V = 4020000,
@@ -335,7 +379,7 @@ typedef enum {
 	BATTERY_VOLT_04_350000_V = 4350000,
 //CEI comment start
 	BATTERY_VOLT_04_352000_V = 4352000,
-//CEI comment end		
+//CEI comment end
 	BATTERY_VOLT_04_360000_V = 4360000,
 	BATTERY_VOLT_04_362500_V = 4362500,
 	BATTERY_VOLT_04_375000_V = 4375000,
@@ -463,7 +507,9 @@ typedef enum {
 	CHARGE_CURRENT_1750_00_MA = 175000,
 	CHARGE_CURRENT_1800_00_MA = 180000,
 	CHARGE_CURRENT_1825_00_MA = 182500,
+//CEI comment start//
 	CHARGE_CURRENT_1856_00_MA = 185600,
+//CEI comment end//
 	CHARGE_CURRENT_1875_00_MA = 187500,
 	CHARGE_CURRENT_1900_00_MA = 190000,
 	CHARGE_CURRENT_1950_00_MA = 195000,
@@ -504,7 +550,7 @@ typedef enum {
 	CHR_VOLT_04_000000_V = 4000,
 //CEI comment start//
 	CHR_VOLT_04_400000_V = 4400,
-//CEI comment end//
+//CEI comment end//	
 	CHR_VOLT_04_500000_V = 4500,
 	CHR_VOLT_05_000000_V = 5000,
 	CHR_VOLT_05_500000_V = 5500,
@@ -567,7 +613,8 @@ typedef enum {
 /* ============================================================ */
 extern int Enable_BATDRV_LOG;
 extern kal_bool chargin_hw_init_done;
-
+extern unsigned int g_bcct_flag;
+extern unsigned int g_aicr_upper_bound;
 
 /* ============================================================ */
 /* External function */
@@ -587,7 +634,7 @@ extern void hw_charging_enable_dp_voltage(int ison);
 
 /* switch charger */
 extern void switch_charger_set_vindpm(unsigned int chr_v);
-extern void mtk_pe20_plugout_reset(void);
+extern int mtk_get_dynamic_cv(unsigned int *cv);
 /*extern BATTERY_VOLTAGE_ENUM battery_get_cv_voltage(void);*/
 /*extern void battery_set_cv_voltage(BATTERY_VOLTAGE_ENUM cv);*/
 
@@ -598,4 +645,23 @@ __weak kal_bool pmic_chrdet_status(void);
 #endif
 /*BCCT input current control function over switch charger*/
 extern unsigned int set_chr_input_current_limit(int current_limit);
-#endif				/* #ifndef _CHARGING_H */
+
+/* Set charger's boost current limit */
+extern int set_chr_boost_current_limit(unsigned int current_limit);
+
+/* Enable/Disable OTG mode */
+extern int set_chr_enable_otg(unsigned int enable);
+
+extern int mtk_chr_get_tchr(int *min_tchr, int *max_tchr);
+extern int mtk_chr_get_soc(unsigned int *soc);
+extern int mtk_chr_get_ui_soc(unsigned int *soc);
+extern int mtk_chr_get_vbat(unsigned int *vbat);
+extern int mtk_chr_get_ibat(unsigned int *ibat);
+extern int mtk_chr_get_vbus(unsigned int *vbus);
+extern int mtk_chr_get_aicr(unsigned int *aicr);
+extern int mtk_chr_is_charger_exist(unsigned char *exist);
+extern int mtk_chr_enable_direct_charge(unsigned char charging_enable);
+extern int mtk_chr_enable_charge(unsigned char charging_enable);
+extern int mtk_chr_reset_aicr_upper_bound(void);
+
+#endif	/* #ifndef _CHARGING_H */

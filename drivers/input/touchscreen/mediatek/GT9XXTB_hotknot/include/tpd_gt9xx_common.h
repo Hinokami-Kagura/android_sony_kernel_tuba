@@ -1,3 +1,20 @@
+/* drivers/input/touchscreen/tpd_gt9xx_common.h
+ *
+ * 2010 - 2012 Goodix Technology.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be a reference
+ * to you, when you are integrating the GOODiX's CTP IC into your system,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ */
+
 #ifndef TPD_CUSTOM_GT9XX_H__
 #define TPD_CUSTOM_GT9XX_H__
 
@@ -24,7 +41,6 @@
 #endif
 #include <linux/interrupt.h>
 #include <linux/time.h>
-#include <linux/rtpm_prio.h>
 
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
@@ -85,6 +101,11 @@ extern u8 got_hotknot_extra_state;
 extern u8 hotknot_paired_flag;
 extern wait_queue_head_t bp_waiter;
 extern s32 gup_load_hotknot_system(void);
+#ifdef CONFIG_GTP_USE_GPIO_BUT_NOT_PINCTRL
+extern int tpd_irq_registration(void);
+extern void gtp_eint_gpio_output(unsigned int gpio_number, int level);
+extern int gtp_irq_enable(void);
+#endif
 
 extern unsigned char gtp_default_FW[];
 extern unsigned char gtp_default_FW_fl[];
@@ -261,10 +282,6 @@ enum CHIP_TYPE_T {
 #define MAX_I2C_TRANSFER_SIZE         (MAX_TRANSACTION_LENGTH - GTP_ADDR_LENGTH)
 #define TPD_MAX_RESET_COUNT           3
 
-#define TPD_CALIBRATION_MATRIX_ROTATION_NORMAL {-4096, 0, 3276800, 0, -4096, 5242880, 0, 0}
-#define TPD_CALIBRATION_MATRIX_ROTATION_FACTORY {-4096, 0, 3276800, 0, -4096, 5242880, 0, 0}
-
-
 #define TPD_RESET_ISSUE_WORKAROUND
 #define TPD_HAVE_CALIBRATION
 #define TPD_NO_GPIO
@@ -385,7 +402,16 @@ void force_reset_guitar(void);
 extern u8 is_resetting;
 #endif
 
+#ifdef CONFIG_GTP_USE_GPIO_BUT_NOT_PINCTRL
+extern unsigned int tpd_rst_gpio_number;
+extern unsigned int tpd_int_gpio_number;
+#endif
 extern int touch_irq;
+#ifdef CONFIG_GTP_USE_GPIO_BUT_NOT_PINCTRL
+extern int tpdGPIOTiedtoIRQ;
+#endif
+extern bool tpdIrqIsEnabled;
+
 extern struct i2c_client *i2c_client_point;
 #if defined(CONFIG_GTP_ESD_PROTECT)
 extern void gtp_esd_switch(struct i2c_client *client, s32 on);

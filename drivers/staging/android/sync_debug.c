@@ -38,6 +38,9 @@
  * [MTK] }}}
  */
 
+/* Defined by MTK for Fence timeout debug, and will not dump at normal time. */
+#define SYNC_DEBUG
+
 static LIST_HEAD(sync_timeline_list_head);
 static DEFINE_SPINLOCK(sync_timeline_list_lock);
 static LIST_HEAD(sync_fence_list_head);

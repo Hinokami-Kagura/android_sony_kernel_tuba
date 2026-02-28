@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************
  *
  * Filename:
@@ -73,8 +86,6 @@ int PMIC_MD_INIT_SETTING_V1(void)
 
 	if (modem_temp_node == NULL) {
 		pr_err("PMIC get modem_temp_node failed\n");
-		if (modem_temp_base)
-			iounmap(modem_temp_base);
 		modem_temp_base = 0;
 	} else {
 		modem_temp_base = of_iomap(modem_temp_node, 0);
@@ -348,7 +359,6 @@ ret = pmic_config_interface(0xA9C, 0x0, 0x7, 5);
 ret = pmic_config_interface(0xA9E, 0x1, 0x1, 9);
 ret = pmic_config_interface(0xAAC, 0x1, 0x1, 9);
 ret = pmic_config_interface(0xB10, 0x2, 0x7, 8);
-ret = pmic_config_interface(0xB24, 0xF0, 0xFF, 2);
 ret = pmic_config_interface(0xCC4, 0x1, 0x1, 8);
 ret = pmic_config_interface(0xCC4, 0x1, 0x1, 9);
 ret = pmic_config_interface(0xCC8, 0x1F, 0xFFFF, 0);
@@ -373,9 +383,9 @@ ret = pmic_config_interface(0xEB4, 0x1, 0x3, 2);
 ret = pmic_config_interface(0xEB4, 0x1, 0x3, 4);
 ret = pmic_config_interface(0xEB4, 0x3, 0x3, 6);
 ret = pmic_config_interface(0xEC6, 0x1, 0x1, 14);
-ret = pmic_config_interface(0xF16, 0x40, 0x3FF, 0);
-ret = pmic_config_interface(0xF16, 0x1, 0x1, 15);
-ret = pmic_config_interface(0xF1C, 0x40, 0x3FF, 0);
+ret = pmic_config_interface(0xF16, 0xC, 0x3FF, 0);
+ret = pmic_config_interface(0xF16, 0x0, 0x1, 15);
+ret = pmic_config_interface(0xF1C, 0xC, 0x3FF, 0);
 ret = pmic_config_interface(0xF1C, 0x1, 0x1, 15);
 ret = pmic_config_interface(0xF20, 0x1, 0x1, 2);
 ret = pmic_config_interface(0xF7A, 0xB, 0xF, 4);

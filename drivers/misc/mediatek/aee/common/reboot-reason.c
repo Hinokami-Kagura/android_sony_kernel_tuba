@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kobject.h>
 #include <linux/string.h>
 #include <linux/sysfs.h>
@@ -41,7 +54,8 @@ enum boot_reason_t {
 	BR_WDT_HW
 };
 
-char boot_reason[][16] = { "keypad", "usb_chg", "rtc", "wdt", "reboot",
+#define REBOOT_REASON_LEN	16
+char boot_reason[][REBOOT_REASON_LEN] = { "keypad", "usb_chg", "rtc", "wdt", "reboot",
 	"tool reboot", "smpl", "others", "kpanic", "wdt_sw", "wdt_hw" };
 
 int __weak aee_rr_reboot_reason_show(struct seq_file *m, void *v)
@@ -93,7 +107,7 @@ static ssize_t powerup_reason_show(struct kobject *kobj, struct kobj_attribute *
 		if (aee_rr_last_fiq_step() != 0)
 			g_boot_reason = BR_KERNEL_PANIC;
 #endif
-		return sprintf(buf, "%s\n", boot_reason[g_boot_reason]);
+		return snprintf(buf, REBOOT_REASON_LEN - 1, "%s\n", boot_reason[g_boot_reason]);
 	} else
 		return 0;
 
@@ -135,7 +149,7 @@ void ksysfs_bootinfo_exit(void)
 
 /* end sysfs bootinfo */
 
-static inline unsigned int get_linear_memory_size(void)
+static inline unsigned long get_linear_memory_size(void)
 {
 	return (unsigned long)high_memory - PAGE_OFFSET;
 }
@@ -254,8 +268,7 @@ inline void aee_print_bt(struct pt_regs *regs)
 #endif
 			cur_frame.pc = excp_regs->reg_pc;
 		}
-		//aee_nested_printf("%p, ", (void *)cur_frame.pc);
-                 aee_nested_printf("[<%p>]%pS\n", (void *)cur_frame.pc, (void *)cur_frame.pc);
+		aee_nested_printf("%p, ", (void *)cur_frame.pc);
 
 	}
 	aee_nested_printf("\n");
@@ -318,7 +331,7 @@ asmlinkage void aee_stop_nested_panic(struct pt_regs *regs)
 	switch (atomic_read(&nested_panic_time)) {
 	case 2:
 		aee_print_regs(regs);
-		aee_nested_printf("backtrace:\n");
+		aee_nested_printf("backtrace:");
 		aee_print_bt(regs);
 		break;
 
@@ -358,7 +371,7 @@ asmlinkage void aee_stop_nested_panic(struct pt_regs *regs)
 			aee_nested_printf("Current\n");
 			if (virt_addr_valid(regs)) {
 				len = aee_nested_save_stack(regs);
-				aee_nested_printf("\nbacktrace:\n");
+				aee_nested_printf("\nbacktrace:");
 				aee_print_bt(regs);
 			}
 		}

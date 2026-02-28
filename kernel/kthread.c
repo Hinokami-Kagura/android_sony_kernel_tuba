@@ -432,15 +432,6 @@ int kthread_park(struct task_struct *k)
 	int ret = -ENOSYS;
 
 	if (kthread) {
-		//Taylor--debug--20160224--B -- need to remove after issue fix
-		if (!strncmp(k->comm, "migration/", sizeof("migration/") - 1) && current != k) {
-		static atomic_t cnt;
-
-		show_stack(NULL, NULL);
-		if (atomic_inc_return(&cnt) > 8)
-		BUG(); 
-		}
-		//Taylor--debug--20160224--E
 		if (!test_bit(KTHREAD_IS_PARKED, &kthread->flags)) {
 			set_bit(KTHREAD_SHOULD_PARK, &kthread->flags);
 			if (k != current) {

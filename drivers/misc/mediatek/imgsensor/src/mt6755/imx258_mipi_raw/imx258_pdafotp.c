@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/videodev2.h>
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
@@ -8,9 +21,13 @@
 #include <asm/atomic.h>
 #include <linux/slab.h>
 
-
+#ifdef IMX258_PDAFOTP_DEBUG
 #define PFX "IMX258_pdafotp"
 #define LOG_INF(format, args...)    pr_debug(PFX "[%s] " format, __FUNCTION__, ##args)
+#else
+#define LOG_INF(format, args...)
+#endif
+
 #include "kd_camera_typedef.h"
 #include "kd_imgsensor.h"
 #include "kd_imgsensor_define.h"
@@ -43,6 +60,7 @@ static bool selective_read_eeprom(kal_uint16 addr, BYTE* data)
 	char pu_send_cmd[2] = {(char)(addr >> 8) , (char)(addr & 0xFF) };
     if(addr > IMX258_MAX_OFFSET)
         return false;
+
 	kdSetI2CSpeed(IMX258_I2C_SPEED);
 
 	if(iReadRegI2C(pu_send_cmd, 2, (u8*)data, 1, IMX258_EEPROM_READ_ID)<0)

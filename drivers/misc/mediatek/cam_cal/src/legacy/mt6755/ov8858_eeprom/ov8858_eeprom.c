@@ -1,4 +1,16 @@
 /*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
+/*
  * Driver for CAM_CAL
  *
  *
@@ -382,7 +394,7 @@ static long CAM_CAL_Ioctl(
 	int i4RetValue = 0;
 	u8 *pBuff = NULL;
 	u8 *pu1Params = NULL;
-	stCAM_CAL_INFO_STRUCT *ptempbuf;
+	stCAM_CAL_INFO_STRUCT *ptempbuf = NULL;/*LukeHu++160201=Fix Code Defect.*/
 
 	CAM_CALDB("[CAM_CAL2] ioctl\n");
 
@@ -412,6 +424,13 @@ static long CAM_CAL_Ioctl(
 	}
 
 	ptempbuf = (stCAM_CAL_INFO_STRUCT *)pBuff;
+	if (NULL == pBuff) /* Dream add for non-null at 2016.02.29 */
+		return -ENOMEM;	
+	if (ptempbuf->u4Length <= 0 || ptempbuf->u4Length > 65535) {
+		kfree(pBuff);
+		CAM_CALDB("ptempbuf->u4Length range is failed\n");
+		return -ENOMEM;
+	}
 	pu1Params = kmalloc(ptempbuf->u4Length, GFP_KERNEL);
 	if (NULL == pu1Params) {
 		kfree(pBuff);
@@ -420,6 +439,12 @@ static long CAM_CAL_Ioctl(
 	}
 	CAM_CALDB(" init Working buffer address 0x%p  command is 0x%x\n", pu1Params, a_u4Command);
 
+	if (ptempbuf->u4Length > 65535) {
+		kfree(pBuff);
+		kfree(pu1Params);
+		CAM_CALDB("ptempbuf->u4Length is large\n");
+		return -EFAULT;
+	}
 
 	if (copy_from_user((u8 *)pu1Params, (u8 *)ptempbuf->pu1Params, ptempbuf->u4Length)) {
 		kfree(pBuff);
@@ -471,11 +496,16 @@ static long CAM_CAL_Ioctl(
 		i4RetValue = -EPERM;
 		break;
 	}
-
 	if (_IOC_READ & _IOC_DIR(a_u4Command)) {
 		/*copy data to user space buffer, keep other input paremeter unchange.*/
 		CAM_CALDB("[CAM_CAL2] to user length %d\n", ptempbuf->u4Length);
-		CAM_CALDB("[CAM_CAL2] to user  Working buffer address 0x%p\n", pu1Params);
+		if (ptempbuf->u4Length > 65535) {
+			kfree(pBuff);
+			kfree(pu1Params);
+			CAM_CALDB("ptempbuf->u4Length is large!\n");
+			return -EFAULT;
+		}
+
 		if (copy_to_user((u8 __user *) ptempbuf->pu1Params , (u8 *)pu1Params , ptempbuf->u4Length)) {
 			kfree(pBuff);
 			kfree(pu1Params);
@@ -728,7 +758,4 @@ module_init(CAM_CAL2_i2C_init);
 module_exit(CAM_CAL2_i2C_exit);
 
 MODULE_DESCRIPTION("ov8858 CAM_CAL2 driver");
-MODULE_AUTHOR("LukeHu <luke.hu@Mediatek.com>");
-MODULE_LICENSE("GPL");
-
-
+MODULE_AUTHOR("DreamYeh <Dream.Yeh@Mediatek.com>");

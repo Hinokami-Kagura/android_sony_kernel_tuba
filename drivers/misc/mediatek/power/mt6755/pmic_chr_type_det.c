@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <generated/autoconf.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -39,6 +52,10 @@
 #include <linux/time.h>
 #include <mt-plat/mt_boot.h>
 
+#ifdef CONFIG_MTK_USB2JTAG_SUPPORT
+#include <mt-plat/mt_usb2jtag.h>
+#endif
+
 
 /* ============================================================ // */
 /* extern function */
@@ -65,7 +82,24 @@ int hw_charging_get_charger_type(void)
 */
 static void hw_bc11_init(void)
 {
+	int timeout_count = 20;
+
 	msleep(200);
+	/* add make sure USB Ready */
+	if (is_usb_rdy() == KAL_FALSE) {
+		battery_log(BAT_LOG_CRTI, "CDP, block\n");
+		while (is_usb_rdy() == KAL_FALSE) {
+			msleep(100);
+			timeout_count--;
+			if (!timeout_count) {
+				battery_log(BAT_LOG_CRTI, "CDP, TIMEOUT!!!\n");
+				break;
+			}
+		}
+		battery_log(BAT_LOG_CRTI, "CDP, free\n");
+	} else
+		battery_log(BAT_LOG_CRTI, "CDP, PASS\n");
+
 #ifdef CONFIG_MTK_KERNEL_POWER_OFF_CHARGING
 	/* add delay to make sure android init.rc finish */
 	if (get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT
@@ -293,6 +327,13 @@ int hw_charging_get_charger_type(void)
 	/* return STANDARD_CHARGER; //adaptor */
 #else
 	CHARGER_TYPE CHR_Type_num = CHARGER_UNKNOWN;
+
+#ifdef CONFIG_MTK_USB2JTAG_SUPPORT
+	if (usb2jtag_mode()) {
+		pr_err("[USB2JTAG] in usb2jtag mode, skip charger detection\n");
+		return STANDARD_HOST;
+	}
+#endif
 
 	/********* Step initial  ***************/
 	hw_bc11_init();

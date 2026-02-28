@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -74,7 +87,7 @@ static struct ppm_policy_data hica_policy = {
 
 struct ppm_hica_algo_data ppm_hica_algo_data = {
 	.cur_state = PPM_POWER_STATE_4LL_L,
-	.new_state = PPM_POWER_STATE_NONE,
+	.new_state = PPM_POWER_STATE_4LL_L,
 
 	.ppm_cur_loads = 0,
 	.ppm_cur_tlp = 0,
@@ -108,6 +121,11 @@ void mt_ppm_hica_update_algo_data(unsigned int cur_loads,
 		cur_state == PPM_POWER_STATE_NONE)
 		goto end;
 
+#ifdef PPM_IC_SEGMENT_CHECK
+	if (ppm_main_info.fix_state_by_segment != PPM_POWER_STATE_NONE)
+		goto end;
+#endif
+
 	/* skip HICA if DVFS is not ready (we cannot get current freq...) */
 	if (!ppm_main_info.client_info[PPM_CLIENT_DVFS].limit_cb)
 		goto end;
@@ -135,7 +153,8 @@ void mt_ppm_hica_update_algo_data(unsigned int cur_loads,
 					ppm_get_power_state_name(ppm_hica_algo_data.new_state)
 					);
 				goto end;
-			} else
+			} else {
+				ppm_hica_algo_data.new_state = cur_state;
 				ppm_dbg(HICA, "[%s(%d)]hold in %s state, loading_cnt = %d, freq_cnt = %d\n",
 					(i == 0) ? "PERF" : "PWR",
 					j,
@@ -143,80 +162,13 @@ void mt_ppm_hica_update_algo_data(unsigned int cur_loads,
 					data->transition_data[j].loading_hold_cnt,
 					data->transition_data[j].freq_hold_cnt
 					);
+			}
 		}
 	}
 
 end:
 	ppm_unlock(&hica_policy.lock);
 	FUNC_EXIT(FUNC_LV_HICA);
-}
-
-unsigned int ppm_hica_get_table_idx_by_perf(enum ppm_power_state state, unsigned int perf_idx)
-{
-	int i;
-	struct ppm_power_state_data *state_info;
-	const struct ppm_state_sorted_pwr_tbl_data *tbl;
-	struct ppm_power_tbl_data power_table = ppm_get_power_table();
-
-	if (state > NR_PPM_POWER_STATE || (perf_idx == -1)) {
-		ppm_warn("Invalid argument: state = %d, pwr_idx = %d\n", state, perf_idx);
-		return -1;
-	}
-
-	/* search whole tlp table */
-	if (state == PPM_POWER_STATE_NONE) {
-		for (i = 1; i < power_table.nr_power_tbl; i++) {
-			if (power_table.power_tbl[i].perf_idx < perf_idx)
-				return power_table.power_tbl[i-1].index;
-		}
-	} else {
-		state_info = ppm_get_power_state_info();
-		tbl = state_info[state].perf_sorted_tbl;
-
-		/* return -1 (not found) if input is larger than max perf_idx in table */
-		if (tbl->sorted_tbl[0].value < perf_idx)
-			return -1;
-
-		for (i = 1; i < tbl->size; i++) {
-			if (tbl->sorted_tbl[i].value < perf_idx)
-				return tbl->sorted_tbl[i-1].index;
-		}
-	}
-
-	/* not found */
-	return -1;
-}
-
-unsigned int ppm_hica_get_table_idx_by_pwr(enum ppm_power_state state, unsigned int pwr_idx)
-{
-	int i;
-	struct ppm_power_state_data *state_info;
-	const struct ppm_state_sorted_pwr_tbl_data *tbl;
-	struct ppm_power_tbl_data power_table = ppm_get_power_table();
-
-	if (state > NR_PPM_POWER_STATE || (pwr_idx == ~0)) {
-		ppm_warn("Invalid argument: state = %d, pwr_idx = %d\n", state, pwr_idx);
-		return -1;
-	}
-
-	/* search whole tlp table */
-	if (state == PPM_POWER_STATE_NONE) {
-		for_each_pwr_tbl_entry(i, power_table) {
-			if (power_table.power_tbl[i].power_idx <= pwr_idx)
-				return i;
-		}
-	} else {
-		state_info = ppm_get_power_state_info();
-		tbl = state_info[state].pwr_sorted_tbl;
-
-		for (i = 0; i < tbl->size; i++) {
-			if (tbl->sorted_tbl[i].value <= pwr_idx)
-				return tbl->sorted_tbl[i].advise_index;
-		}
-	}
-
-	/* not found */
-	return -1;
 }
 
 void ppm_hica_set_default_limit_by_state(enum ppm_power_state state,
@@ -236,6 +188,12 @@ void ppm_hica_set_default_limit_by_state(enum ppm_power_state state,
 			policy->req.limit[i].max_cpu_core = get_cluster_max_cpu_core(i);
 			policy->req.limit[i].min_cpufreq_idx = get_cluster_min_cpufreq_idx(i);
 			policy->req.limit[i].max_cpufreq_idx = get_cluster_max_cpufreq_idx(i);
+
+#ifdef PPM_DISABLE_CLUSTER_MIGRATION
+			/* keep at least 1 LL */
+			if (i == 0)
+				policy->req.limit[i].min_cpu_core = 1;
+#endif
 		} else {
 			policy->req.limit[i].min_cpu_core =
 				state_info[state].cluster_limit->state_limit[i].min_cpu_core;
@@ -248,13 +206,27 @@ void ppm_hica_set_default_limit_by_state(enum ppm_power_state state,
 		}
 	}
 
+#ifdef PPM_IC_SEGMENT_CHECK
+	/* ignore HICA min freq setting for L cluster in L_ONLY state */
+	if (state == PPM_POWER_STATE_L_ONLY && ppm_main_info.fix_state_by_segment == PPM_POWER_STATE_L_ONLY)
+		policy->req.limit[1].min_cpufreq_idx = get_cluster_min_cpufreq_idx(1);
+#endif
+
 	FUNC_EXIT(FUNC_LV_HICA);
 }
 
 enum ppm_power_state ppm_hica_get_state_by_perf_idx(enum ppm_power_state state, unsigned int perf_idx)
 {
 	enum ppm_power_state new_state = state;
-	unsigned int index = 0, level = 0, found = 0;
+	struct ppm_power_state_data *state_info;
+#ifdef PPM_POWER_TABLE_CALIBRATION
+	struct ppm_state_sorted_pwr_tbl_data *tbl;
+#else
+	const struct ppm_state_sorted_pwr_tbl_data *tbl;
+#endif
+	struct ppm_power_tbl_data power_table = ppm_get_power_table();
+	unsigned int level = 0, found = 0;
+	int index = 0;
 
 	FUNC_ENTER(FUNC_LV_HICA);
 
@@ -262,8 +234,22 @@ enum ppm_power_state ppm_hica_get_state_by_perf_idx(enum ppm_power_state state, 
 	if (fix_power_state != PPM_POWER_STATE_NONE)
 		return fix_power_state;
 
+	state_info = ppm_get_power_state_info();
+	tbl = state_info[state].perf_sorted_tbl;
+
+	if (perf_idx >= power_table.power_tbl[0].perf_idx) {
+		/* use the most powerful state */
+		found = 1;
+		new_state = NR_PPM_POWER_STATE - 1;
+		goto done;
+	} else if (perf_idx <= tbl->sorted_tbl[0].value) {
+		/* current state is enough */
+		found = 1;
+		goto done;
+	}
+
 	while (1) {
-		index = ppm_hica_get_table_idx_by_perf(new_state, perf_idx);
+		index = ppm_get_table_idx_by_perf(new_state, perf_idx);
 		ppm_ver("@%s: index = %d\n", __func__, index);
 		if (index != -1) {
 			found = 1;
@@ -280,6 +266,7 @@ enum ppm_power_state ppm_hica_get_state_by_perf_idx(enum ppm_power_state state, 
 		level++; /* to find next state */
 	}
 
+done:
 	FUNC_EXIT(FUNC_LV_HICA);
 
 	return (found) ? new_state : PPM_POWER_STATE_NONE;
@@ -288,7 +275,8 @@ enum ppm_power_state ppm_hica_get_state_by_perf_idx(enum ppm_power_state state, 
 enum ppm_power_state ppm_hica_get_state_by_pwr_budget(enum ppm_power_state state, unsigned int budget)
 {
 	enum ppm_power_state new_state = state;
-	unsigned int index = 0, level = 0, found = 0;
+	unsigned int level = 0, found = 0;
+	int index = 0;
 
 	FUNC_ENTER(FUNC_LV_HICA);
 
@@ -300,7 +288,7 @@ enum ppm_power_state ppm_hica_get_state_by_pwr_budget(enum ppm_power_state state
 		return PPM_POWER_STATE_NONE;
 
 	while (1) {
-		index = ppm_hica_get_table_idx_by_pwr(new_state, budget);
+		index = ppm_get_table_idx_by_pwr(new_state, budget);
 		ppm_ver("@%s: index = %d\n", __func__, index);
 		if (index != -1) {
 			found = 1;
@@ -471,9 +459,17 @@ static ssize_t ppm_hica_power_state_proc_write(struct file *file, const char __u
 	if (!buf)
 		return -EINVAL;
 
-	if (!kstrtoint(buf, 10, &state))
+	if (!kstrtoint(buf, 10, &state)) {
+#ifdef PPM_DISABLE_CLUSTER_MIGRATION
+		if (state == PPM_POWER_STATE_L_ONLY || state == PPM_POWER_STATE_4L_LL)
+			ppm_warn("Invalid state(%d) since cluster migration is disabled!\n", state);
+		else
+			fix_power_state = (state == -1) ? PPM_POWER_STATE_NONE : state;
+#else
 		fix_power_state = (state == -1) ? PPM_POWER_STATE_NONE : state;
-	else
+#endif
+		ppm_info("@%s: fix_power_state = %s\n", __func__, ppm_get_power_state_name(fix_power_state));
+	} else
 		ppm_err("echo (state idx) > /proc/ppm/policy/hica_power_state\n");
 
 	free_page((unsigned long)buf);
@@ -490,6 +486,8 @@ PROC_FOPS_RW_HICA_SETTINGS(freq_hold_time, p->freq_hold_time);
 PROC_FOPS_RO_HICA_SETTINGS(freq_hold_cnt, p->freq_hold_cnt);
 PROC_FOPS_RW_HICA_SETTINGS(tlp_bond, p->tlp_bond);
 
+#define OUTPUT_BUF_SIZE	32
+
 static int __init ppm_hica_policy_init(void)
 {
 	int ret = 0, i, j, k;
@@ -497,7 +495,7 @@ static int __init ppm_hica_policy_init(void)
 	struct proc_dir_entry *hica_setting_dir = NULL;
 	struct proc_dir_entry *trans_rule_dir = NULL;
 	struct ppm_state_transfer_data *data;
-	char str[32];
+	char str[OUTPUT_BUF_SIZE];
 
 	struct pentry {
 		const char *name;
@@ -545,7 +543,7 @@ static int __init ppm_hica_policy_init(void)
 			if (!data->transition_data[j].transition_rule)
 				continue;
 
-			sprintf(str, "%s_to_%s", ppm_get_power_state_name(i / 2),
+			snprintf(str, OUTPUT_BUF_SIZE, "%s_to_%s", ppm_get_power_state_name(i / 2),
 				ppm_get_power_state_name(data->transition_data[j].next_state));
 			trans_rule_dir = proc_mkdir(str, hica_setting_dir);
 			if (!trans_rule_dir) {

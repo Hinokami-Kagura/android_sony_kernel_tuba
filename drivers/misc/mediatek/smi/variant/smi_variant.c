@@ -1,8 +1,20 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/kobject.h>
-
 #include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -12,6 +24,8 @@
 #include <linux/slab.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/fb.h>
+#include <linux/notifier.h>
 
 #include <linux/ioctl.h>
 #include <linux/fs.h>
@@ -41,7 +55,13 @@
 #define LARB_BACKUP_REG_SIZE 128
 
 #define SMI_COMMON_BACKUP_REG_NUM   10
+#ifdef CONFIG_ARCH_MT8167
+/* mt8167 has different register offset as other SoCs of SMI_L1LEN etc */
+static unsigned short g_smi_common_backup_reg_offset[SMI_COMMON_BACKUP_REG_NUM] = {
+	0x100, 0x104, 0x108, 0x10c, 0x110, 0x114, 0x120, 0x230, 0x234, 0x238
+};
 
+#else
 /*
  * SMI COMMON register list to be backuped
  * for some socs which do not have some register, it's OK to read and write to
@@ -50,6 +70,7 @@
 static unsigned short g_smi_common_backup_reg_offset[SMI_COMMON_BACKUP_REG_NUM] = {
 	0x200, 0x204, 0x208, 0x20c, 0x210, 0x214, 0x220, 0x230, 0x234, 0x238
 };
+#endif
 
 #define SF_HWC_PIXEL_MAX_NORMAL  (2560 * 1600 * 7)
 #define SF_HWC_PIXEL_MAX_VR   (2560 * 1600 * 7)
@@ -153,10 +174,19 @@ static unsigned int smi_get_larb_index(struct device *dev)
 
 int mtk_smi_larb_clock_on(int larbid, bool pm)
 {
+	int ret;
+
 	if (!smi_data || larbid < 0 || larbid >= smi_data->larb_nr)
 		return -EINVAL;
 
-	return _mtk_smi_larb_get(smi_data->larb[larbid], pm);
+	ret = _mtk_smi_larb_get(smi_data->larb[larbid], pm);
+	WARN_ON(ret);
+	if (ret)
+		return ret;
+
+	smi_data->larbref[larbid]++;
+
+	return ret;
 }
 
 void mtk_smi_larb_clock_off(int larbid, bool pm)
@@ -164,7 +194,10 @@ void mtk_smi_larb_clock_off(int larbid, bool pm)
 	if (!smi_data || larbid < 0 || larbid >= smi_data->larb_nr)
 		return;
 
-	_mtk_smi_larb_put(smi_data->larb[larbid], pm);
+	WARN_ON(smi_data->larbref[larbid] <= 0);
+	if (!smi_clk_always_on)
+		_mtk_smi_larb_put(smi_data->larb[larbid], pm);
+	smi_data->larbref[larbid]--;
 }
 
 static void backup_smi_common(void)
@@ -255,11 +288,13 @@ static void restore_larb_smi(int index)
 	}
 
 	/* we do not backup 0x20 because it is a fixed setting */
-	if (smi_data->smi_priv->plat == MTK_PLAT_MT8173 || smi_data->smi_priv->plat == MTK_PLAT_MT8163)
+	if (smi_data->smi_priv->plat == MTK_PLAT_MT8173 || smi_data->smi_priv->plat == MTK_PLAT_MT8163
+		|| smi_data->smi_priv->plat == MTK_PLAT_MT8167)
 		M4U_WriteReg32(larb_base, 0x20, smi_data->smi_priv->larb_vc_setting[index]);
 
-	/* turn off EMI empty OSTD dobule, fixed setting */
-	M4U_WriteReg32(larb_base, 0x2c, 4);
+	/* turn off EMI empty OSTD dobule, fixed setting, mt8167 do not have this register */
+	if (smi_data->smi_priv->plat != MTK_PLAT_MT8167)
+		M4U_WriteReg32(larb_base, 0x2c, 4);
 
 }
 
@@ -346,7 +381,8 @@ int larb_reg_restore(int larb)
 	/*M4U_WriteReg32(larb_base, SMI_ROUTE_SEL, *(pReg++) ); */
 
 	smi_larb_init(larb);
-	if (smi_data->smi_priv->plat == MTK_PLAT_MT8173 || smi_data->smi_priv->plat == MTK_PLAT_MT8163)
+	if (smi_data->smi_priv->plat == MTK_PLAT_MT8173 || smi_data->smi_priv->plat == MTK_PLAT_MT8163
+		|| smi_data->smi_priv->plat == MTK_PLAT_MT8167)
 		m4u_larb_restore_sec(larb);
 
 	return 0;
@@ -358,10 +394,10 @@ static int fake_mode_handling(MTK_SMI_BWC_CONFIG *p_conf, unsigned int *pu4Local
 	if (p_conf->scenario == SMI_BWC_SCEN_WFD) {
 		if (p_conf->b_on_off) {
 			wifi_disp_transaction = 1;
-			SMIMSG("Enable WFD in profile: %d\n", smi_profile);
+			SMIDBG(1, "Enable WFD in profile: %d\n", smi_profile);
 		} else {
 			wifi_disp_transaction = 0;
-			SMIMSG("Disable WFD in profile: %d\n", smi_profile);
+			SMIDBG(1, "Disable WFD in profile: %d\n", smi_profile);
 		}
 		return 1;
 	} else {
@@ -512,7 +548,7 @@ static int smi_bwc_config(MTK_SMI_BWC_CONFIG *p_conf, unsigned int *pu4LocalCnt)
 	/* Bandwidth Limiter */
 	switch (eFinalScen) {
 	case SMI_BWC_SCEN_VP:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_VP");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_VP");
 		if (smi_data->smi_priv->plat != MTK_PLAT_MT8163)
 			smicur->vp_setting(smi_data);
 		else {
@@ -526,52 +562,52 @@ static int smi_bwc_config(MTK_SMI_BWC_CONFIG *p_conf, unsigned int *pu4LocalCnt)
 		break;
 
 	case SMI_BWC_SCEN_SWDEC_VP:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_SWDEC_VP");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_SWDEC_VP");
 		smicur->vp_setting(smi_data);
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_VP;
 		break;
 
 	case SMI_BWC_SCEN_VR:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_VR");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_VR");
 		smicur->vr_setting(smi_data);
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_VR;
 		break;
 
 	case SMI_BWC_SCEN_VR_SLOW:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_VR");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_VR");
 		smi_profile = SMI_BWC_SCEN_VR_SLOW;
 		smicur->vr_setting(smi_data);
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_VR;
 		break;
 
 	case SMI_BWC_SCEN_VENC:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_VENC");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_VENC");
 		smicur->vr_setting(smi_data);
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_NORMAL;
 		break;
 
 	case SMI_BWC_SCEN_NORMAL:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_NORMAL");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_NORMAL");
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_NORMAL;
 		smicur->init_setting(smi_data, &is_default_value_saved,
 				default_val_smi_l1arb, smi_data->larb_nr);
 		break;
 
 	case SMI_BWC_SCEN_MM_GPU:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_MM_GPU");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_MM_GPU");
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_NORMAL;
 		smicur->init_setting(smi_data, &is_default_value_saved,
 				default_val_smi_l1arb, smi_data->larb_nr);
 		break;
 
 	case SMI_BWC_SCEN_HDMI:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_HDMI");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_HDMI");
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_NORMAL;
 		smicur->hdmi_setting(smi_data);
 		break;
 
 	case SMI_BWC_SCEN_HDMI4K:
-		SMIMSG("[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_HDMI4K");
+		SMIDBG(1, "[SMI_PROFILE] : %s\n", "SMI_BWC_SCEN_HDMI4K");
 		g_smi_bwc_mm_info.hw_ovl_limit = SF_HWC_PIXEL_MAX_NORMAL;
 		smicur->hdmi_4k_setting(smi_data);
 		break;
@@ -593,7 +629,7 @@ static int smi_bwc_config(MTK_SMI_BWC_CONFIG *p_conf, unsigned int *pu4LocalCnt)
 	/* Since send uevent may trigger sleeping, we must send the event after releasing spin lock */
 	ovl_limit_uevent(smi_profile, g_smi_bwc_mm_info.hw_ovl_limit);
 
-	SMIMSG("SMI_PROFILE to:%d %s,cur:%d,%d,%d,%d\n", p_conf->scenario,
+	SMIDBG(1, "SMI_PROFILE to:%d %s,cur:%d,%d,%d,%d\n", p_conf->scenario,
 	       (p_conf->b_on_off ? "on" : "off"), eFinalScen,
 	       g_SMIInfo.pu4ConcurrencyTable[SMI_BWC_SCEN_NORMAL],
 	       g_SMIInfo.pu4ConcurrencyTable[SMI_BWC_SCEN_VR],
@@ -902,10 +938,10 @@ static void mtk_smi_common_put(struct device *smidev, bool pm)
 {
 	struct mtk_smi_common *smipriv = dev_get_drvdata(smidev);
 
-	if (pm)
-		pm_runtime_put_sync(smidev);
 	clk_disable_unprepare(smipriv->clk_smi);
 	clk_disable_unprepare(smipriv->clk_apb);
+	if (pm)
+		pm_runtime_put_sync(smidev);
 }
 
 static int _mtk_smi_larb_get(struct device *larbdev, bool pm)
@@ -1076,6 +1112,7 @@ static const struct of_device_id mtk_smi_larb_of_ids[] = {
 	{ .compatible = "mediatek,mt8173-smi-larb", },
 	{ .compatible = "mediatek,mt8163-smi-larb", },
 	{ .compatible = "mediatek,mt8127-smi-larb", },
+	{ .compatible = "mediatek,mt8167-smi-larb", },
 	{}
 };
 
@@ -1098,6 +1135,7 @@ static const struct of_device_id mtk_smi_of_ids[] = {
 	{ .compatible = "mediatek,mt8173-smi", .data = &smi_mt8173_priv, },
 	{ .compatible = "mediatek,mt8163-smi", .data = &smi_mt8163_priv, },
 	{ .compatible = "mediatek,mt8127-smi", .data = &smi_mt8127_priv, },
+	{ .compatible = "mediatek,mt8167-smi", .data = &smi_mt8167_priv, },
 	{}
 };
 
@@ -1158,7 +1196,84 @@ static int mtk_smi_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 	return 0;
 }
+static int smi_suspend;
+static int mtk_smi_larb_fb_suspend(void)
+{
+	int i;
 
+	if (!smi_data || !smi_data->larb_nr) {
+		SMIMSG("smi fb suspend, smi or smi larb did not probed\n");
+		return 0;
+	}
+
+	for (i = 0; i < smi_data->larb_nr; i++) {
+		mtk_smi_larb_clock_on(i, true);
+		larb_reg_backup(i);
+		mtk_smi_larb_clock_off(i, true);
+	}
+	smi_suspend = 1;
+	SMIMSG("mtk_smi_larb fb suspended\n");
+	return 0;
+}
+
+static int mtk_smi_larb_fb_resume(void)
+{
+	int i;
+
+	if (!smi_suspend) {
+		SMIMSG("resume without suspend\n");
+		return 0;
+	}
+
+	if (!smi_data || !smi_data->larb_nr) {
+		SMIMSG("smi fb resume, smi or smi larb did not probed\n");
+		return 0;
+	}
+
+	for (i = 0; i < smi_data->larb_nr; i++) {
+		mtk_smi_larb_clock_on(i, true);
+		larb_reg_restore(i);
+		mtk_smi_larb_clock_off(i, true);
+	}
+
+	smi_suspend = 0;
+	SMIMSG("mtk_smi_larb fb resume\n");
+	return 0;
+
+}
+
+static int mtk_smi_variant_event_notify(struct notifier_block *self,
+				unsigned long action, void *data)
+{
+	if (action != FB_EARLY_EVENT_BLANK)
+		return 0;
+
+	{
+		struct fb_event *event = data;
+		int blank_mode = *((int *)event->data);
+
+		switch (blank_mode) {
+		case FB_BLANK_UNBLANK:
+		case FB_BLANK_NORMAL:
+			mtk_smi_larb_fb_resume();
+			break;
+		case FB_BLANK_VSYNC_SUSPEND:
+		case FB_BLANK_HSYNC_SUSPEND:
+			break;
+		case FB_BLANK_POWERDOWN:
+			mtk_smi_larb_fb_suspend();
+			break;
+		default:
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
+
+static struct notifier_block mtk_smi_variant_event_notifier = {
+	.notifier_call  = mtk_smi_variant_event_notify,
+};
 
 static int __init smi_init(void)
 {
@@ -1192,7 +1307,7 @@ static int __init smi_init(void)
 	spin_lock_init(&g_SMIInfo.SMI_lock);
 
 	SMI_DBG_Init();
-
+	fb_register_client(&mtk_smi_variant_event_notifier);
 	SMIMSG("smi_init done\n");
 
 	return 0;
@@ -1630,7 +1745,7 @@ long MTK_SMI_COMPAT_ioctl(struct file *filp, unsigned int cmd, unsigned long arg
 	case COMPAT_MTK_IOC_SMI_BWC_CONFIG:
 		{
 			if (COMPAT_MTK_IOC_SMI_BWC_CONFIG == MTK_IOC_SMI_BWC_CONFIG) {
-				SMIMSG("Optimized compct IOCTL: COMPAT_MTK_IOC_SMI_BWC_CONFIG");
+				SMIDBG(1, "Optimized compct IOCTL: COMPAT_MTK_IOC_SMI_BWC_CONFIG");
 				return filp->f_op->unlocked_ioctl(filp, cmd,
 								  (unsigned long)compat_ptr(arg));
 			} else {
@@ -1659,7 +1774,7 @@ long MTK_SMI_COMPAT_ioctl(struct file *filp, unsigned int cmd, unsigned long arg
 		{
 
 			if (COMPAT_MTK_IOC_SMI_BWC_INFO_SET == MTK_IOC_SMI_BWC_INFO_SET) {
-				SMIMSG("Optimized compct IOCTL: COMPAT_MTK_IOC_SMI_BWC_INFO_SET");
+				SMIDBG(1, "Optimized compct IOCTL: COMPAT_MTK_IOC_SMI_BWC_INFO_SET");
 				return filp->f_op->unlocked_ioctl(filp, cmd,
 								  (unsigned long)compat_ptr(arg));
 			} else {
@@ -1686,7 +1801,7 @@ long MTK_SMI_COMPAT_ioctl(struct file *filp, unsigned int cmd, unsigned long arg
 	case COMPAT_MTK_IOC_SMI_BWC_INFO_GET:
 		{
 			if (COMPAT_MTK_IOC_SMI_BWC_INFO_GET == MTK_IOC_SMI_BWC_INFO_GET) {
-				SMIMSG("Optimized compct IOCTL: COMPAT_MTK_IOC_SMI_BWC_INFO_GET");
+				SMIDBG(1, "Optimized compct IOCTL: COMPAT_MTK_IOC_SMI_BWC_INFO_GET");
 				return filp->f_op->unlocked_ioctl(filp, cmd,
 								  (unsigned long)compat_ptr(arg));
 			} else {

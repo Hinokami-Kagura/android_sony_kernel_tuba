@@ -330,7 +330,10 @@ static void mmc_ffu_free_mem(struct mmc_ffu_mem *mem)
 		return;
 	while (mem->cnt--)
 		__free_pages(mem->arr[mem->cnt].page, mem->arr[mem->cnt].order);
+
 	kfree(mem->arr);
+
+	kfree(mem);
 }
 
 /*
@@ -515,7 +518,8 @@ static int mmc_ffu_restart(struct mmc_card *card)
 	mmc_set_bus_width(card->host, MMC_BUS_WIDTH_1);
 
 	card->state |= MMC_STATE_FFUED;
-
+	mmc_power_off(host);
+	mmc_power_up(host, card->ocr);
 	err = mmc_reinit_oldcard(host);
 	pr_err("mmc_init_card ret %d\n", err);
 	if (!err)
@@ -730,7 +734,6 @@ int mmc_ffu_install(struct mmc_card *card, u8 *ext_csd)
 		pr_err("FFU: %s: error %d FFU install:\n",
 			mmc_hostname(card->host), err);
 		err = -EINVAL;
-		goto exit;
 	}
 
 exit:

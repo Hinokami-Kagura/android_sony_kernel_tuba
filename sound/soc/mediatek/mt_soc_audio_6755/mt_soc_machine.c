@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -198,7 +200,7 @@ static ssize_t mt_soc_ana_debug_read(struct file *file, char __user *buf,
 
 	pr_debug("mt_soc_ana_debug_read count = %zu\n", count);
 	AudDrv_Clk_On();
-	audckbufEnable(true);
+	/* audckbufEnable(true); */
 
 	n += scnprintf(buffer + n, size - n, "AFE_UL_DL_CON0  = 0x%x\n",
 		       Ana_Get_Reg(AFE_UL_DL_CON0));
@@ -467,6 +469,14 @@ static ssize_t mt_soc_ana_debug_read(struct file *file, char __user *buf,
 		       Ana_Get_Reg(AUDNCP_CLKDIV_CON3));
 	n += scnprintf(buffer + n, size - n, "AUDNCP_CLKDIV_CON4  = 0x%x\n",
 		       Ana_Get_Reg(AUDNCP_CLKDIV_CON4));
+	n += scnprintf(buffer + n, size - n, "DCXO_CW00  = 0x%x\n",
+		       Ana_Get_Reg(DCXO_CW00));
+	n += scnprintf(buffer + n, size - n, "DCXO_CW01  = 0x%x\n",
+		       Ana_Get_Reg(DCXO_CW01));
+	n += scnprintf(buffer + n, size - n, "DCXO_CW02  = 0x%x\n",
+		       Ana_Get_Reg(DCXO_CW02));
+	n += scnprintf(buffer + n, size - n, "DCXO_CW03  = 0x%x\n",
+		       Ana_Get_Reg(DCXO_CW03));
 
 	n += scnprintf(buffer + n, size - n, "TOP_CKPDN_CON0  = 0x%x\n",
 		       Ana_Get_Reg(TOP_CKPDN_CON0));
@@ -475,7 +485,7 @@ static ssize_t mt_soc_ana_debug_read(struct file *file, char __user *buf,
 	n += scnprintf(buffer + n, size - n, "GPIO_MODE3  = 0x%x\n", Ana_Get_Reg(GPIO_MODE3));
 	pr_debug("mt_soc_ana_debug_read len = %d\n", n);
 
-	audckbufEnable(false);
+	/* audckbufEnable(false); */
 	AudDrv_Clk_Off();
 
 	ret = simple_read_from_buffer(buf, count, pos, buffer, n);
@@ -853,6 +863,10 @@ static ssize_t mt_soc_debug_write(struct file *f, const char __user *buf,
 	char delim[] = " ,";
 
 	memset((void *)InputString, 0, 256);
+
+	if (count > 256)
+		count = 256;
+
 	if (copy_from_user((InputString), buf, count))
 		pr_debug("copy_from_user mt_soc_debug_write count = %zu temp = %s\n", count,
 			 InputString);
@@ -887,11 +901,10 @@ static ssize_t mt_soc_debug_write(struct file *f, const char __user *buf,
 		ret = kstrtoul(token3, 16, &regaddr);
 		ret = kstrtoul(token5, 16, &regvalue);
 		pr_debug("%s regaddr = 0x%lu regvalue = 0x%lu\n", ParSetkeyAna, regaddr, regvalue);
-		/* clk_buf_ctrl(CLK_BUF_AUDIO, true); //6752 need? */
-		audckbufEnable(true);
+		/* audckbufEnable(true); */
 		Ana_Set_Reg(regaddr, regvalue, 0xffffffff);
 		regvalue = Ana_Get_Reg(regaddr);
-		audckbufEnable(false);
+		/* audckbufEnable(false); */
 		pr_debug("%s regaddr = 0x%lu regvalue = 0x%lu\n", ParSetkeyAna, regaddr, regvalue);
 	}
 	if (strcmp(token1, ParSetkeyCfg) == 0) {
@@ -911,10 +924,10 @@ static ssize_t mt_soc_debug_write(struct file *f, const char __user *buf,
 	}
 	if (strcmp(token1, PareGetkeyAna) == 0) {
 		pr_debug("strcmp (token1,PareGetkeyAna)\n");
-		audckbufEnable(true);
+		/* audckbufEnable(true); */
 		ret = kstrtoul(token3, 16, &regaddr);
 		regvalue = Ana_Get_Reg(regaddr);
-		audckbufEnable(false);
+		/* audckbufEnable(false); */
 		pr_debug("%s regaddr = 0x%lu regvalue = 0x%lu\n", PareGetkeyAna, regaddr, regvalue);
 	}
 
@@ -1191,26 +1204,22 @@ static struct snd_soc_dai_link mt_soc_dai_common[] = {
 	 .ops = &mt_machine_audio_ops,
 	 },
 #ifdef CONFIG_MTK_BTCVSD_ALSA
-	 {
-	 .name = "BTCVSD_RX",
-	 .stream_name = MT_SOC_BTCVSD_CAPTURE_STREAM_NAME,
-	 .cpu_dai_name   = MT_SOC_BTCVSD_RX_DAI_NAME,
-	 .platform_name  = MT_SOC_BTCVSD_RX_PCM,
-	 .codec_dai_name = MT_SOC_CODEC_BTCVSD_RX_DAI_NAME,
-	 .codec_name = MT_SOC_CODEC_DUMMY_NAME,
-	 .init = mt_soc_audio_init,
-	 .ops = &mt_machine_audio_ops,
-	 },
-	 {
-	 .name = "BTCVSD_TX",
-	 .stream_name = MT_SOC_BTCVSD_PLAYBACK_STREAM_NAME,
-	 .cpu_dai_name   = MT_SOC_BTCVSD_TX_DAI_NAME,
-	 .platform_name  = MT_SOC_BTCVSD_TX_PCM,
-	 .codec_dai_name = MT_SOC_CODEC_BTCVSD_TX_DAI_NAME,
-	 .codec_name = MT_SOC_CODEC_DUMMY_NAME,
-	 .init = mt_soc_audio_init,
-	 .ops = &mt_machine_audio_ops,
-	 },
+	{
+		.name = "BTCVSD_RX",
+		.stream_name = MT_SOC_BTCVSD_CAPTURE_STREAM_NAME,
+		.cpu_dai_name   = "snd-soc-dummy-dai",
+		.platform_name  = MT_SOC_BTCVSD_RX_PCM,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		},
+	{
+		.name = "BTCVSD_TX",
+		.stream_name = MT_SOC_BTCVSD_PLAYBACK_STREAM_NAME,
+		.cpu_dai_name   = "snd-soc-dummy-dai",
+		.platform_name  = MT_SOC_BTCVSD_TX_PCM,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+	},
 #endif
 };
 

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kdev_t.h>
@@ -25,6 +38,8 @@
 
 #include <mt-plat/sync_write.h>
 
+#include <mt_smi.h>
+
 #ifdef CONFIG_MTK_CLKMGR
 #include "mach/mt_clkmgr.h"
 #else
@@ -37,8 +52,8 @@
 
 /* LOG */
 #define MJC_ASSERT(x) {if (!(x)) pr_error("MJC assert fail, file:%s, line:%d", __FILE__, __LINE__); }
-#define MTK_MJC_DBG
 
+/*#define MTK_MJC_DBG */
 #ifdef MTK_MJC_DBG
 #define MJCDBG(string, args...)       pr_debug("MJC [pid=%d]"string, current->tgid, ##args)
 #else
@@ -86,6 +101,7 @@ static struct clk *clk_MJC_TOP_CLK_0;
 static struct clk *clk_MJC_TOP_CLK_1;
 static struct clk *clk_MJC_TOP_CLK_2;
 static struct clk *clk_MJC_LARB4_ASIF;
+static struct clk *clk_SCP_SYS_DIS;
 static struct clk *clk_SCP_SYS_MJC;
 static struct clk *clk_TOP_MUX_MJC;
 static struct clk *clk_TOP_IMGPLL_CK;
@@ -233,14 +249,14 @@ static int _mjc_SetEvent(MJC_EVENT_T *a_prParam)
  * RETURNS
  *    None.
  ****************************************************************************/
-static void _mjc_m4uConfigPort(void)
+static void _mjc_m4uConfigPort(bool isOpen)
 {
 	int u4Status;
 	M4U_PORT_STRUCT rM4uPort;
 
 	rM4uPort.Virtuality = 1;
 	rM4uPort.Security = 0;
-	rM4uPort.Distance = 0;
+	rM4uPort.Distance = isOpen ? 0 : 1;
 	rM4uPort.Direction = 0;
 	rM4uPort.domain = 3;
 
@@ -349,6 +365,12 @@ static int mjc_open(struct inode *pInode, struct file *pFile)
 	enable_clock(MT_CG_MJC_TOP_GROUP2, "mjc");
 	enable_clock(MT_CG_MJC_LARB4_AXI_ASIF, "mjc");
 #else
+	ret = clk_prepare_enable(clk_SCP_SYS_DIS);
+	if (ret) {
+		/* print error log & error handling */
+		MJCMSG("[ERROR] mjc_open() clk_SCP_SYS_DIS is not enabled, ret = %d\n", ret);
+	}
+
 	ret = clk_prepare_enable(clk_SCP_SYS_MJC);
 	if (ret) {
 		/* print error log & error handling */
@@ -419,7 +441,7 @@ static int mjc_open(struct inode *pInode, struct file *pFile)
 	grHWLockContext.rEvent.u4TimeoutMs = 0xFFFFFFFF;
 	spin_unlock_irqrestore(&HWLock, ulFlags);
 
-	_mjc_m4uConfigPort();
+	_mjc_m4uConfigPort(true);
 
 	m4u_register_fault_callback(M4U_PORT_MJC_MV_RD, mjc_m4u_fault_callback, (void *)0);
 	m4u_register_fault_callback(M4U_PORT_MJC_MV_WR, mjc_m4u_fault_callback, (void *)0);
@@ -444,7 +466,30 @@ static int mjc_open(struct inode *pInode, struct file *pFile)
  ****************************************************************************/
 static int mjc_release(struct inode *pInode, struct file *pFile)
 {
+	int ret;
 	MJCDBG("mjc_release() pid = %d\n", current->pid);
+
+	_mjc_m4uConfigPort(false);
+
+	ret = clk_prepare_enable(clk_TOP_MUX_MJC);
+	if (ret) {
+		/* print error log & error handling */
+		MJCMSG("[ERROR] mjc_open() clk_TOP_MUX_MJC is not enabled, ret = %d\n", ret);
+	}
+	ret = clk_set_parent(clk_TOP_MUX_MJC, clk_TOP_UNIVPLL_D5); /* UNIVPLL_D5 (250) */
+	if (ret) {
+		/* print error log & error handling */
+		MJCMSG("[ERROR] mjc_ioctl() TOP_UNIVPLL_D5 is not enabled, ret = %d\n", ret);
+	}
+	clk_disable_unprepare(clk_TOP_MUX_MJC);
+
+#ifdef CONFIG_MTK_SMI_EXT
+	ret = mmdvfs_set_step(SMI_BWC_SCEN_VPMJC, MMDVFS_VOLTAGE_LOW);
+	if (0 != ret) {
+		/* Add one line comment for avoid kernel coding style, WARNING:BRACES: */
+		MJCMSG("[ERROR] mjc_ioctl() OOPS: mmdvfs_set_step error!");
+	}
+#endif
 
 	m4u_unregister_fault_callback(M4U_PORT_MJC_MV_RD);
 	m4u_unregister_fault_callback(M4U_PORT_MJC_MV_WR);
@@ -470,6 +515,7 @@ static int mjc_release(struct inode *pInode, struct file *pFile)
 	clk_disable_unprepare(clk_MJC_TOP_CLK_2);
 	clk_disable_unprepare(clk_MJC_LARB4_ASIF);
 	clk_disable_unprepare(clk_SCP_SYS_MJC);
+	clk_disable_unprepare(clk_SCP_SYS_DIS);
 #endif
 	return 0;
 }
@@ -712,12 +758,26 @@ static long mjc_ioctl(struct file *pfile, unsigned int u4cmd, unsigned long u4ar
 			}
 
 			if (rSrcClk.u2OutputFramerate == 600) {	/* frame rate 60 case */
+#ifdef CONFIG_MTK_SMI_EXT
+				ret = mmdvfs_set_step(SMI_BWC_SCEN_VPMJC, MMDVFS_VOLTAGE_LOW);
+				if (0 != ret) {
+					/* Add one line comment for avoid kernel coding style, WARNING:BRACES: */
+					MJCMSG("[ERROR] mjc_ioctl() OOPS: mmdvfs_set_step error!");
+				}
+#endif
 				ret = clk_set_parent(clk_TOP_MUX_MJC, clk_TOP_UNIVPLL_D5); /* UNIVPLL_D5 (250) */
 				if (ret) {
 					/* print error log & error handling */
 					MJCMSG("[ERROR] mjc_ioctl() TOP_UNIVPLL_D5 is not enabled, ret = %d\n", ret);
 				}
 			} else if (rSrcClk.u2OutputFramerate == 1200) {	/* frame rate 120 case */
+#ifdef CONFIG_MTK_SMI_EXT
+				ret = mmdvfs_set_step(SMI_BWC_SCEN_VPMJC, MMDVFS_VOLTAGE_HIGH);
+				if (0 != ret) {
+					/* Add one line comment for avoid kernel coding style, WARNING:BRACES: */
+					MJCMSG("[ERROR] mjc_ioctl() OOPS: mmdvfs_set_step error!");
+				}
+#endif
 				ret = clk_set_parent(clk_TOP_MUX_MJC, clk_TOP_IMGPLL_CK); /* IMGPLL (450) */
 				if (ret) {
 					/* print error log & error handling */
@@ -974,6 +1034,12 @@ static int mjc_probe(struct platform_device *pDev)
 	if (IS_ERR(clk_MJC_LARB4_ASIF)) {
 		MJCMSG("[ERROR] Unable to devm_clk_get MJC_LARB4_ASIF\n");
 		return PTR_ERR(clk_MJC_LARB4_ASIF);
+	}
+
+	clk_SCP_SYS_DIS = devm_clk_get(&pDev->dev, "mtcmos-dis");
+	if (IS_ERR(clk_SCP_SYS_DIS)) {
+		MJCMSG("[ERROR] Unable to devm_clk_get SCP_SYS_DIS\n");
+		return PTR_ERR(clk_SCP_SYS_DIS);
 	}
 
 	clk_SCP_SYS_MJC = devm_clk_get(&pDev->dev, "mtcmos-mjc");

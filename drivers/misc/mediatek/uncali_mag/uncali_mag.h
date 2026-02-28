@@ -1,3 +1,15 @@
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
 
 #ifndef __UNCALI_MAG_H__
 #define __UNCALI_MAG_H__
@@ -11,19 +23,30 @@
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/hwmsensor.h>
-#include <linux/earlysuspend.h>
-#include <linux/hwmsen_dev.h>
 
-/* #define DEBUG */
+#include <linux/i2c.h>
+#include <linux/irq.h>
+#include <linux/uaccess.h>
+#include <linux/delay.h>
+#include <linux/kobject.h>
+#include <linux/atomic.h>
+#include <linux/ioctl.h>
+
+#include <batch.h>
+#include <sensors_io.h>
+#include <hwmsen_helper.h>
+#include <hwmsensor.h>
+#include <hwmsen_dev.h>
+
+#define DEBUG
 
 #ifdef DEBUG
-#define UNCALI_MAG_TAG					"<UNCALI_MAG> "
-#define UNCALI_MAG_FUN(f)				pr_debug(UNCALI_MAG_TAG"%s\n", __func__)
-#define UNCALI_MAG_ERR(fmt, args...)		pr_debug(UNCALI_MAG_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
+#define UNCALI_MAG_TAG						"<UNCALI_MAG> "
+#define UNCALI_MAG_FUN(f)					pr_debug(UNCALI_MAG_TAG"%s\n", __func__)
+#define UNCALI_MAG_ERR(fmt, args...)		pr_err(UNCALI_MAG_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
 #define UNCALI_MAG_LOG(fmt, args...)		pr_debug(UNCALI_MAG_TAG fmt, ##args)
-#define UNCALI_MAG_VER(fmt, args...)	pr_debug(UNCALI_MAG_TAG"%s: "fmt, __func__, ##args) /* ((void)0) */
-#define UNCALI_MAG_DBGMSG pr_debug("%s, %d\n", __func__, __LINE__)
+#define UNCALI_MAG_VER(fmt, args...)		pr_debug(UNCALI_MAG_TAG"%s: "fmt, __func__, ##args) /* ((void)0) */
+#define UNCALI_MAG_DBGMSG					pr_debug("%s, %d\n", __func__, __LINE__)
 #else
 #define UNCALI_MAG_TAG					"<UNCALI_MAG> "
 #define UNCALI_MAG_FUN(f)
@@ -38,13 +61,15 @@
 
 #define UNCALI_MAG_INVALID_VALUE -1
 
-#define EVENT_TYPE_UNCALI_MAG_X				ABS_X
-#define EVENT_TYPE_UNCALI_MAG_Y				ABS_Y
-#define EVENT_TYPE_UNCALI_MAG_Z				ABS_Z
+#define EVENT_TYPE_UNCALI_MAG_X					ABS_X
+#define EVENT_TYPE_UNCALI_MAG_Y					ABS_Y
+#define EVENT_TYPE_UNCALI_MAG_Z					ABS_Z
 #define EVENT_TYPE_UNCALI_MAG_X_BIAS			ABS_RX
 #define EVENT_TYPE_UNCALI_MAG_Y_BIAS			ABS_RY
 #define EVENT_TYPE_UNCALI_MAG_Z_BIAS			ABS_RZ
-#define EVENT_TYPE_UNCALI_MAG_STATUS			REL_X
+#define EVENT_TYPE_UNCALI_MAG_UPDATE			REL_X
+#define EVENT_TYPE_UNCALI_MAG_TIMESTAMP_HI		REL_HWHEEL
+#define EVENT_TYPE_UNCALI_MAG_TIMESTAMP_LO		REL_DIAL
 
 #define UNCALI_MAG_VALUE_MAX (32767)
 #define UNCALI_MAG_VALUE_MIN (-32768)
@@ -79,7 +104,7 @@ struct uncali_mag_init_info {
 };
 
 struct uncali_mag_data {
-	hwm_sensor_data uncali_mag_data;
+	struct hwm_sensor_data uncali_mag_data;
 	int data_updata;
 };
 
@@ -118,7 +143,7 @@ struct uncali_mag_context {
 
 /* for auto detect */
 extern int uncali_mag_driver_add(struct uncali_mag_init_info *obj);
-extern int uncali_mag_data_report(int *data, int status);
+extern int uncali_mag_data_report(int *data, int status, int64_t nt);
 extern int uncali_mag_register_control_path(struct uncali_mag_control_path *ctl);
 extern int uncali_mag_register_data_path(struct uncali_mag_data_path *data);
 

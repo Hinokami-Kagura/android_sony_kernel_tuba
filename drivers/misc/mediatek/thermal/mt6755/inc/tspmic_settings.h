@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <mach/upmu_hw.h>
 #include <mach/mt_pmic_wrap.h>
 
@@ -15,11 +28,12 @@
 
 #define mtktspmic_info(fmt, args...)   pr_debug("[Power/PMIC_Thermal] " fmt, ##args)
 
-
+//CEI comment start//
 #define mtktspmic_dprintk(fmt, args...)   \
 do {										\
 		pr_debug("[Power/PMIC_Thermal] " fmt, ##args);\
 } while (0)
+//CEI comment end//
 
 #define mtktstsx_dprintk(fmt, args...)  pr_debug("[TSX_Thermal] " fmt, ##args)
 

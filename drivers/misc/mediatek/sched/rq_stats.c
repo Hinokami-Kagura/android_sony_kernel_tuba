@@ -51,6 +51,7 @@ struct notifier_block freq_transition;
 #endif /* CONFIG_CPU_FREQ */
 struct notifier_block cpu_hotplug;
 static unsigned int heavy_task_threshold = 650; /* max=1023 */
+static int htask_cpucap_ctrl = 1;
 
 struct cpu_load_data {
 	cputime64_t prev_cpu_idle;
@@ -67,6 +68,7 @@ struct cpu_load_data {
 };
 
 static DEFINE_PER_CPU(struct cpu_load_data, cpuload);
+static DEFINE_PER_CPU(struct cpufreq_policy, cpupolicy);
 
 #ifdef CONFIG_CPU_FREQ
 #include <linux/cpufreq.h>
@@ -314,6 +316,32 @@ static void __trace_out(int heavy, int cpu, struct task_struct *p)
 			trace_sched_task_entity_avg(5, p, &p->se.avg);
 }
 
+static int ack_by_curcap(int cpu, int cluster_id, int max_cluster_id)
+{
+	unsigned long cur_cap;
+	unsigned long max_cap;
+	int acked = 0;
+	int thrshld;
+
+	if (!htask_cpucap_ctrl) /* disable cpucap control */
+		return 1;
+
+	if (cluster_id == max_cluster_id)
+		return 1; /* skip checking for the fastest cluster */
+	else if (cluster_id == 0)
+		thrshld = SCHED_CAPACITY_SCALE*60/100;
+	else
+		thrshld = SCHED_CAPACITY_SCALE*40/100;
+	cur_cap = topology_cur_cpu_capacity(cpu);
+	max_cap = topology_max_cpu_capacity(cpu);
+	if ((cur_cap * SCHED_CAPACITY_SCALE) >= max_cap * thrshld)
+		acked = 1;
+	else
+		acked = 0;
+
+	return acked;
+}
+
 static unsigned int htask_statistic;
 unsigned int sched_get_nr_heavy_task_by_threshold(int cluster_id, unsigned int threshold)
 {
@@ -328,21 +356,15 @@ unsigned int sched_get_nr_heavy_task_by_threshold(int cluster_id, unsigned int t
 	if (rq_info.init != 1)
 		return 0;
 	clusters = arch_get_nr_clusters();
-	if (cluster_id < 0 || cluster_id > arch_get_nr_clusters()) {
+	if (cluster_id < 0 || cluster_id >= clusters) {
 		pr_warn("[%s] invalid cluster id %d\n", __func__, cluster_id);
 		return 0;
 	}
 
 	arch_get_cluster_cpus(&cls_cpus, cluster_id);
-
 	for_each_cpu_mask(cpu, cls_cpus) {
-		unsigned long cur_cap;
-		unsigned long max_cap;
-		int delta = SCHED_CAPACITY_SCALE*5/100;
 		if (likely(!cpu_online(cpu)))
 			continue;
-		cur_cap = topology_cur_cpu_capacity(cpu);
-		max_cap = topology_max_cpu_capacity(cpu);
 		raw_spin_lock_irqsave(&cpu_rq(cpu)->lock, flags);
 		list_for_each_entry(p, &cpu_rq(cpu)->cfs_tasks, se.group_node) {
 			is_heavy = 0;
@@ -351,10 +373,7 @@ unsigned int sched_get_nr_heavy_task_by_threshold(int cluster_id, unsigned int t
 				continue;
 #endif
 			if (p->se.avg.loadwop_avg_contrib >= threshold) {
-				if ((cur_cap * SCHED_CAPACITY_SCALE) >= max_cap * (threshold-delta))
-					is_heavy = 1;
-				else
-					is_heavy = 0;
+				is_heavy = ack_by_curcap(cpu, cluster_id, clusters-1);
 				count += is_heavy ? 1 : 0;
 				__trace_out(is_heavy, cpu, p);
 			}
@@ -467,10 +486,10 @@ static int cpu_hotplug_handler(struct notifier_block *nb,
 			this_cpu->cur_freq = cpufreq_quick_get(cpu);
 		for_each_cpu(i, cpu_online_mask) {
 			struct cpu_load_data *cld = &per_cpu(cpuload, i);
-			struct cpufreq_policy cpu_policy;
+			struct cpufreq_policy *cpu_policy  = &per_cpu(cpupolicy, i);
 
-			cpufreq_get_policy(&cpu_policy, i);
-			cpumask_copy(cld->related_cpus, cpu_policy.cpus);
+			cpufreq_get_policy(cpu_policy, i);
+			cpumask_copy(cld->related_cpus, cpu_policy->cpus);
 		}
 		/* cpu_online()=0 here, count cpu offline period as idle */
 		spin_lock_irqsave(&this_cpu->cpu_load_lock, flags);
@@ -611,22 +630,11 @@ static ssize_t store_def_timer_ms(struct kobject *kobj,
 	return count;
 }
 
-static ssize_t store_heavy_task_threshold(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int val = 0;
-
-	if (0 != sscanf(buf, "%iu", &val))
-		sched_set_heavy_task_threshold(val);
-
-	return count;
-}
-
 static struct kobj_attribute def_timer_ms_attr =
 	__ATTR(def_timer_ms, S_IWUSR | S_IRUSR, show_def_timer_ms,
 	store_def_timer_ms);
 
-static ssize_t show_cpu_normalized_load(struct kobject *kobj,
+static ssize_t cpu_normalized_load_show(struct kobject *kobj,
 					struct kobj_attribute *attr, char *buf)
 {
 	int cpu;
@@ -668,10 +676,49 @@ static ssize_t show_cpu_normalized_load(struct kobject *kobj,
 
 	return len;
 }
+static struct kobj_attribute cpu_normalized_load_attr = __ATTR_RO(cpu_normalized_load);
 
-static struct kobj_attribute cpu_normalized_load_attr =
-	__ATTR(cpu_normalized_load, S_IWUSR | S_IRUSR, show_cpu_normalized_load,
+static ssize_t show_heavy_tasks(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	unsigned int len = 0;
+	unsigned int max_len = 4096;
+	int i;
+
+	len += snprintf(buf+len, max_len-len, "htask_cpucap_ctrl=%d, htask_threshold=%d, total_htask#=%d\n",
+					htask_cpucap_ctrl, heavy_task_threshold, htask_statistic);
+	for (i = 0; i < arch_get_nr_clusters(); i++)
+		len += snprintf(buf+len, max_len-len, "cluster%d: current_htask#=%u\n", i, sched_get_nr_heavy_task2(i));
+
+	return len;
+}
+
+static ssize_t store_heavy_task_threshold(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	unsigned int val = 0;
+
+	if (0 != sscanf(buf, "%iu", &val))
+		sched_set_heavy_task_threshold(val);
+
+	return count;
+}
+
+static struct kobj_attribute htasks_attr =
+	__ATTR(htasks, S_IWUSR | S_IRUSR, show_heavy_tasks,
 			store_heavy_task_threshold);
+
+static ssize_t htask_cpucap_ctrl_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	unsigned int val = 0;
+
+	if (0 != sscanf(buf, "%iu", &val))
+		htask_cpucap_ctrl = (val == 0 ? 0 : 1);
+
+	return count;
+}
+static struct kobj_attribute htask_cpucap_ctrl_attr = __ATTR_WO(htask_cpucap_ctrl);
 
 static struct attribute *rq_attrs[] = {
 	&cpu_normalized_load_attr.attr,
@@ -679,6 +726,8 @@ static struct attribute *rq_attrs[] = {
 	&run_queue_avg_attr.attr,
 	&run_queue_poll_ms_attr.attr,
 	&hotplug_disabled_attr.attr,
+	&htasks_attr.attr,
+	&htask_cpucap_ctrl_attr.attr,
 	NULL,
 };
 
@@ -693,9 +742,8 @@ static int init_rq_attribs(void)
 	rq_info.rq_avg = 0;
 	rq_info.attr_group = &rq_attr_group;
 
-	/* Create /sys/devices/system/cpu/cpu0/rq-stats/... */
-	rq_info.kobj = kobject_create_and_add("rq-stats",
-			&get_cpu_device(0)->kobj);
+	/* Create /sys/devices/system/cpu/rq-stats/... */
+	rq_info.kobj = kobject_create_and_add("rq-stats", &cpu_subsys.dev_root->kobj);
 	if (!rq_info.kobj)
 		return -ENOMEM;
 
@@ -713,12 +761,21 @@ static int __init rq_stats_init(void)
 	int ret = 0;
 	int i;
 #ifdef CONFIG_CPU_FREQ
-	struct cpufreq_policy cpu_policy;
+	struct cpufreq_policy *cpu_policy;
+
+	cpu_policy = kmalloc(sizeof(struct cpufreq_policy), GFP_KERNEL);
+	if (!cpu_policy) {
+		rq_info.init = 0;
+		return -ENOSYS;
+	}
 #endif
 	/* Bail out if this is not an SMP Target */
 #ifndef CONFIG_SMP
-		rq_info.init = 0;
-		return -ENOSYS;
+#ifdef CONFIG_CPU_FREQ
+	kfree(cpu_policy);
+#endif
+	rq_info.init = 0;
+	return -ENOSYS;
 #endif
 
 #ifdef CONFIG_MTK_SCHED_RQAVG_US_ENABLE_WQ
@@ -740,11 +797,11 @@ static int __init rq_stats_init(void)
 		spin_lock_init(&pcpu->cpu_load_lock);
 		pcpu->cur_freq = pcpu->policy_max = 1;
 #ifdef CONFIG_CPU_FREQ
-		cpufreq_get_policy(&cpu_policy, i);
-		pcpu->policy_max = cpu_policy.cpuinfo.max_freq;
+		cpufreq_get_policy(cpu_policy, i);
+		pcpu->policy_max = cpu_policy->cpuinfo.max_freq;
 		if (cpu_online(i))
 			pcpu->cur_freq = cpufreq_quick_get(i);
-		cpumask_copy(pcpu->related_cpus, cpu_policy.cpus);
+		cpumask_copy(pcpu->related_cpus, cpu_policy->cpus);
 #endif /* CONFIG_CPU_FREQ */
 		if (!cpufreq_variant)
 			pcpu->cur_freq = pcpu->policy_max;
@@ -757,6 +814,9 @@ static int __init rq_stats_init(void)
 	register_hotcpu_notifier(&cpu_hotplug);
 
 	rq_info.init = 1;
+#ifdef CONFIG_CPU_FREQ
+	kfree(cpu_policy);
+#endif
 
 	return ret;
 }

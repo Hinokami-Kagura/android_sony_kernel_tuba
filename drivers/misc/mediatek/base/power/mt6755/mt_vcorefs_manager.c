@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/kernel.h>
 #include <linux/kobject.h>
 #include <linux/mutex.h>
@@ -104,7 +117,7 @@ int vcorefs_get_curr_opp(void)
 /*
  * Sub-main function
  */
-static int _get_dvfs_opp(struct vcorefs_profile *pwrctrl)
+static int _get_dvfs_opp(int kicker, struct vcorefs_profile *pwrctrl)
 {
 	unsigned int opp = UINT_MAX;
 	int i;
@@ -114,7 +127,7 @@ static int _get_dvfs_opp(struct vcorefs_profile *pwrctrl)
 	for (i = 0; i < NUM_KICKER; i++)
 		p += sprintf(p, " %d,", kicker_table[i]);
 
-	vcorefs_info("kr opp: %s\n", table);
+	vcorefs_debug_mask(kicker, "kr opp: %s\n", table);
 
 	for (i = 0; i < NUM_KICKER; i++) {
 		if (kicker_table[i] < 0)
@@ -137,7 +150,7 @@ static int kicker_request_compare(enum dvfs_kicker kicker, enum dvfs_opp opp)
 	if (opp == kicker_table[kicker] && kicker != KIR_SYSFS) {
 		/* try again since previous change is partial success */
 		if (vcorefs_curr_opp == vcorefs_prev_opp) {
-			vcorefs_err("opp no change, kr_tb: %d, kr: %d, opp: %d\n",
+			vcorefs_debug_mask(LAST_KICKER, "opp no change, kr_tb: %d, kr: %d, opp: %d\n",
 				    kicker_table[kicker], kicker, opp);
 			return -1;
 		}
@@ -155,7 +168,7 @@ static int kicker_request_mask(struct vcorefs_profile *pwrctrl, enum dvfs_kicker
 		if (opp < 0)
 			kicker_table[kicker] = opp;
 
-		vcorefs_err("mask request, mask: 0x%x, kr: %d, opp: %d\n",
+		vcorefs_debug_mask(LAST_KICKER, "mask request, mask: 0x%x, kr: %d, opp: %d\n",
 			    pwrctrl->kr_req_mask, kicker, opp);
 		return -1;
 	}
@@ -192,6 +205,12 @@ int vcorefs_request_dvfs_opp(enum dvfs_kicker kicker, enum dvfs_opp opp)
 	int r;
 	int autok_r, autok_lock;
 
+	if (is_vcorefs_feature_enable() && !pwrctrl->init_done) {
+		vcorefs_debug_mask(kicker, "request before init done(kr:%d opp:%d)\n", kicker, opp);
+		if (vcorefs_request_init_opp(kicker, opp))
+			return 0;
+	}
+
 	if (!feature_en || !pwrctrl->init_done) {
 		vcorefs_err("feature_en: %d, init_done: %d\n", feature_en, pwrctrl->init_done);
 		return -1;
@@ -223,15 +242,15 @@ int vcorefs_request_dvfs_opp(enum dvfs_kicker kicker, enum dvfs_opp opp)
 		return -1;
 
 	if (kicker_request_compare(kicker, opp))
-		return -1;
+		return 0; /* already request, return OK */
 
 	mutex_lock(&vcorefs_mutex);
 
 	krconf.kicker = kicker;
 	krconf.opp = opp;
-	krconf.dvfs_opp = _get_dvfs_opp(pwrctrl);
+	krconf.dvfs_opp = _get_dvfs_opp(kicker, pwrctrl);
 
-	vcorefs_crit("kicker: %d, opp: %d, dvfs_opp: %d, curr_opp: %d\n",
+	vcorefs_debug_mask(kicker, "kicker: %d, opp: %d, dvfs_opp: %d, curr_opp: %d\n",
 		     krconf.kicker, krconf.opp, krconf.dvfs_opp, vcorefs_curr_opp);
 
 	record_kicker_opp_in_aee(kicker, opp);
@@ -251,7 +270,7 @@ int vcorefs_request_dvfs_opp(enum dvfs_kicker kicker, enum dvfs_opp opp)
 		vcorefs_prev_opp = krconf.dvfs_opp;
 		vcorefs_curr_opp = krconf.dvfs_opp;
 	} else if (r < 0) {
-		vcorefs_err("Vcore DVFS Fail, r: %d\n", r);
+		vcorefs_err("kicker: %d, Vcore DVFS Fail, r: %d\n", kicker, r);
 
 		/* if (r == -2) no change */
 		if (r == -3) {
@@ -259,7 +278,7 @@ int vcorefs_request_dvfs_opp(enum dvfs_kicker kicker, enum dvfs_opp opp)
 			vcorefs_curr_opp = krconf.dvfs_opp;
 		}
 	} else {
-		vcorefs_err("unknown error handling, r: %d\n", r);
+		vcorefs_err("kicker: %d, unknown error handling, r: %d\n", kicker, r);
 		BUG();
 	}
 	mutex_unlock(&vcorefs_mutex);
@@ -291,6 +310,11 @@ int vcorefs_autok_set_vcore(int kicker, enum dvfs_opp opp)
 
 	if (opp >= NUM_OPP || !pwrctrl->autok_lock) {
 		vcorefs_err("set vcore fail, opp: %d, autok_lock: %d\n", opp, pwrctrl->autok_lock);
+		return -1;
+	}
+
+	if (vcorefs_gpu_get_init_opp() == OPPI_PERF && opp == OPPI_LOW_PWR) {
+		vcorefs_err("autok kicker:%d set vcore fail due to init_opp request OPPI_PERF\n", kicker);
 		return -1;
 	}
 
@@ -333,14 +357,32 @@ void vcorefs_drv_init(bool plat_init_done, bool plat_feature_en, int plat_init_o
 		kicker_table[i] = -1;
 	aee_rr_rec_vcore_dvfs_opp(0xffffffff);
 
+	if (vcorefs_gpu_get_init_opp() == OPPI_PERF) {
+		/* GPU kicker already request HPM in init */
+		kicker_table[KIR_GPU] = OPPI_PERF;
+		aee_rr_rec_vcore_dvfs_opp(0xfffffeff);
+	}
+
 	vcorefs_curr_opp = plat_init_opp;
 	pwrctrl->plat_init_opp = plat_init_opp;
 	pwrctrl->init_done = plat_init_done;
 	mutex_unlock(&vcorefs_mutex);
 
 	governor_autok_manager();
+	vcorefs_gpu_set_init_opp(OPPI_UNREQ);
 }
 
+void vcorefs_set_feature_en(bool enable)
+{
+	feature_en = enable;
+}
+
+void vcorefs_set_kr_req_mask(unsigned int mask)
+{
+	struct vcorefs_profile *pwrctrl = &vcorefs_ctrl;
+
+	pwrctrl->kr_req_mask = mask;
+}
 /*
  * Vcorefs debug sysfs
  */

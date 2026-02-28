@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef __MODEM_REG_BASE_H__
 #define __MODEM_REG_BASE_H__
 
@@ -49,10 +62,14 @@
 /*#define L1_BASE_MADDR_MDL1_CONF	(0x260F0000)*/
 
 /*MD bootup register*/
-#define MD1_CFG_BASE (0x20000000)
-#define MD1_CFG_BOOT_STATS0 (MD1_CFG_BASE+0x70)
-#define MD1_CFG_BOOT_STATS1 (MD1_CFG_BASE+0x74)
+/* in modem view */
+/* #define MD1_CFG_BASE (0x20000000) */
+/* #define MD1_CFG_BOOT_STATS0 (MD1_CFG_BASE+0x70) */
+/* #define MD1_CFG_BOOT_STATS1 (MD1_CFG_BASE+0x74) */
 
+/* in AP infra view */
+#define MD1_CFG_BOOT_STATS0 (0x10201300)
+#define MD1_CFG_BOOT_STATS1 (0x10201304)
 /* ============================================================ */
 /* Modem 2 part */
 /* ============================================================ */

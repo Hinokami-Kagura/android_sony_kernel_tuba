@@ -11,10 +11,6 @@
 #include <linux/interrupt.h>
 #include <linux/completion.h>
 
-#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
-#define CONFIG_CMDQ_CMD_DAT_PARALLEL
-#endif
-
 struct request;
 struct mmc_data;
 struct mmc_request;
@@ -216,6 +212,10 @@ extern int mmc_detect_card_removed(struct mmc_host *host);
 
 #if defined(CONFIG_MMC_FFU)
 extern int mmc_reinit_oldcard(struct mmc_host *host);
+#endif
+
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+extern int mmc_blk_cmdq_switch(struct mmc_card *card, int enable);
 #endif
 
 /**

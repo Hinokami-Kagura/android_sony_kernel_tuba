@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /*****************************************************************************/
 /*****************************************************************************/
 #include <linux/mm.h>
@@ -284,15 +297,6 @@ static long mtk_extd_mgr_ioctl(struct file *file, unsigned int cmd, unsigned lon
 	case MTK_HDMI_FACTORY_DPI_STOP_AND_POWER_OFF:
 		{
 			/* /r = hdmi_factory_mode_test(STEP4_DPI_STOP_AND_POWER_OFF, NULL); */
-			break;
-		}
-	case MTK_HDMI_FAKE_PLUG_IN:
-		{
-			int connect = arg & 0x0FF;
-
-			if (extd_driver[DEV_MHL] && extd_driver[DEV_MHL]->fake_connect)
-				extd_driver[DEV_MHL]->fake_connect(connect);
-
 			break;
 		}
 	default:

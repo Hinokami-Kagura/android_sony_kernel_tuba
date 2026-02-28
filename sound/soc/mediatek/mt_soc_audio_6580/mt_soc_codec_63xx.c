@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 MediaTek Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program
+ * If not, see <http://www.gnu.org/licenses/>.
  */
 /*******************************************************************************
  *
@@ -269,7 +271,7 @@ void audckbufEnable(bool enable)
 	mutex_lock(&Ana_buf_Ctrl_Mutex);
 	if (enable) {
 		if (audck_buf_Count == 0) {
-#ifdef CONFIG_MTK_FPGA
+#ifdef CONFIG_FPGA_EARLY_PORTING
 			pr_warn("fpga bypass clk_buf_ctrl(CLK_BUF_AUDIO,true)\n");
 #else
 			pr_warn("+clk_buf_ctrl(CLK_BUF_AUDIO,true)\n");
@@ -282,7 +284,7 @@ void audckbufEnable(bool enable)
 	} else {
 		audck_buf_Count--;
 		if (audck_buf_Count == 0) {
-#ifdef CONFIG_MTK_FPGA
+#ifdef CONFIG_FPGA_EARLY_PORTING
 			pr_warn("fpga bypass clk_buf_ctrl(CLK_BUF_AUDIO,false)\n");
 #else
 			pr_warn("+clk_buf_ctrl(CLK_BUF_AUDIO,false)\n");
@@ -786,6 +788,7 @@ uint32 GetDLFrequency(uint32 frequency)
 		break;
 	case 48000:
 		Reg_value = 10;
+		break;
 	default:
 		pr_warn("GetDLFrequency with frequency = %d", frequency);
 	}
@@ -1113,6 +1116,7 @@ uint32 GetDLNewIFFrequency(unsigned int frequency)
 		break;
 	case 48000:
 		Reg_value = 8;
+		break;
 	default:
 		pr_warn("ApplyDLNewIFFrequency with frequency = %d", frequency);
 	}
@@ -1131,6 +1135,7 @@ uint32 GetULNewIFFrequency(unsigned int frequency)
 		break;
 	case 48000:
 		Reg_value = 3;
+		break;
 	default:
 		pr_warn("GetULNewIFFrequency with frequency = %d", frequency);
 	}
@@ -3696,6 +3701,48 @@ static int Voice_Call_DAC_DAC_HS_Set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static const char * const Pmic_LPBK_function[] = { "Off", "LPBK3" };
+static int32 Pmic_Loopback_Type;
+static int Pmic_Loopback_Get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s()\n", __func__);
+	ucontrol->value.integer.value[0] = Pmic_Loopback_Type;
+	return 0;
+}
+
+static int Pmic_Loopback_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s()\n", __func__);
+
+	if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(Pmic_LPBK_function)) {
+		pr_err("return -EINVAL\n");
+		return -EINVAL;
+	}
+	if (ucontrol->value.integer.value[0] == 0) { /* disable pmic lpbk */
+
+		/* downlink data loop back to uplink */
+		Ana_Set_Reg(ABB_AFE_CON2, 0x0, 0x8);
+		Ana_Set_Reg(ABB_AFE_CON0, 0x0000, 0x0003);	/* turn off UL */
+		Topck_Enable(false);
+		ClsqEnable(false);
+		audckbufEnable(false);
+	} else if (ucontrol->value.integer.value[0] > 0) { /* enable pmic lpbk */
+		audckbufEnable(true);
+		ClsqEnable(true);
+		Topck_Enable(true);
+
+		/* downlink data loop back to uplink */
+		Ana_Set_Reg(ABB_AFE_CON2, 0x8, 0x8);
+
+		/* turn on DL & UL */
+		Ana_Set_Reg(ABB_AFE_CON0, 0x0003, 0x0003);
+	}
+
+	pr_warn("%s() done\n", __func__);
+	Pmic_Loopback_Type = ucontrol->value.integer.value[0];
+	return 0;
+}
+
 /* here start uplink power function */
 static const char * const Pmic_Test_function[] = { "Off", "On" };
 
@@ -3705,6 +3752,7 @@ static const struct soc_enum Pmic_Test_Enum[] = {
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(Pmic_Test_function), Pmic_Test_function),
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(Pmic_Test_function), Pmic_Test_function),
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(Pmic_Test_function), Pmic_Test_function),
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(Pmic_LPBK_function), Pmic_LPBK_function),
 };
 
 static const struct snd_kcontrol_new mt6350_pmic_Test_controls[] = {
@@ -3717,6 +3765,7 @@ static const struct snd_kcontrol_new mt6350_pmic_Test_controls[] = {
 	SOC_ENUM_EXT("Voice_Call_DAC_DAC_HS", Pmic_Test_Enum[3], Voice_Call_DAC_DAC_HS_Get,
 		     Voice_Call_DAC_DAC_HS_Set),
 	SOC_ENUM_EXT("SineTable_UL2", Pmic_Test_Enum[4], SineTable_UL2_Get, SineTable_UL2_Set),
+	SOC_ENUM_EXT("Pmic_Loopback", Pmic_Test_Enum[5], Pmic_Loopback_Get, Pmic_Loopback_Set),
 };
 
 static const struct snd_kcontrol_new mt6350_UL_Codec_controls[] = {
@@ -3817,7 +3866,9 @@ static void mt6350_codec_init_reg(struct snd_soc_codec *codec)
 	Ana_Set_Reg(AUDTOP_CON6, 0x37A2, 0xFFFF);
 	Ana_Set_Reg(AUDTOP_CON6, 0x37E2, 0xFFFF);	/* Enable the depop MUX of HP drivers */
 	pr_warn("%s, inverse pmic clk gpio\n", __func__);
+#ifndef CONFIG_FPGA_EARLY_PORTING
 	pmic_config_interface(0xc060, 0x1, 0x1, 7); /* [7:7]: GPIO_inv, inverse the PMIC gpio clk, ALPS02247074 */
+#endif
 	audckbufEnable(false);
 	AudDrv_Clk_Off();
 #endif

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/init.h>		/* For init/exit macros */
 #include <linux/module.h>	/* For MODULE_ marcros  */
 #include <linux/kernel.h>
@@ -11,7 +24,7 @@
 
 #include <asm/uaccess.h>
 #include <linux/types.h>
-#include <mt_wdt.h>
+#include "mt_wdt.h"
 #include <linux/delay.h>
 
 #include <linux/device.h>
@@ -162,8 +175,8 @@ void mtk_wdt_mode_config(bool dual_mode_en, bool irq, bool ext_en, bool ext_pol,
 	mt_reg_sync_writel(tmp, MTK_WDT_MODE);
 	/* dual_mode(1); //always dual mode */
 	/* mdelay(100); */
-	pr_debug(" mtk_wdt_mode_config  mode value=%x, tmp:%x,pid=%d\n", __raw_readl(MTK_WDT_MODE),
-		 tmp, current->pid);
+	/* pr_debug(" mtk_wdt_mode_config  mode value=%x, tmp:%x,pid=%d\n", __raw_readl(MTK_WDT_MODE),
+		 tmp, current->pid); */
 #endif
 	spin_unlock(&rgu_reg_operation_spinlock);
 }
@@ -600,6 +613,14 @@ void mtk_wd_resume(void)
 {
 }
 
+void mtk_wd_suspend_sodi(void)
+{
+}
+
+void mtk_wd_resume_sodi(void)
+{
+}
+
 void wdt_dump_reg(void)
 {
 }
@@ -880,7 +901,22 @@ void mtk_wd_resume(void)
 	pr_debug("[WDT] resume(%d)\n", g_wdt_enable);
 }
 
+void mtk_wd_suspend_sodi(void)
+{
+	/* mtk_wdt_ModeSelection(KAL_FALSE, KAL_FALSE, KAL_FALSE); */
+	/* en debug, dis irq, dis ext, low pol, dis wdt */
+	mtk_wdt_mode_config(TRUE, TRUE, TRUE, FALSE, FALSE);
+	mtk_wdt_restart(WD_TYPE_NORMAL);
+}
 
+void mtk_wd_resume_sodi(void)
+{
+	if (g_wdt_enable == 1) {
+		mtk_wdt_set_time_out_value(g_last_time_time_out_value);
+		mtk_wdt_mode_config(TRUE, TRUE, TRUE, FALSE, TRUE);
+		mtk_wdt_restart(WD_TYPE_NORMAL);
+	}
+}
 
 static struct platform_driver mtk_wdt_driver = {
 

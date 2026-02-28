@@ -1,10 +1,24 @@
 /*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+/*
  * Driver for CAM_CAL
  *
  *
  */
 
+#ifndef CONFIG_MTK_I2C_EXTENSION
 #define CONFIG_MTK_I2C_EXTENSION
+#endif
 #include <linux/i2c.h>
 #undef CONFIG_MTK_I2C_EXTENSION
 #include <linux/platform_device.h>
@@ -30,12 +44,13 @@
 #define CAM_CAL_DEBUG
 #ifdef CAM_CAL_DEBUG
 #define PFX "cat2416c"
-
 #define CAM_CALINF(fmt, arg...)    pr_debug("[%s] " fmt, __func__, ##arg)
 #define CAM_CALDB(fmt, arg...)    pr_debug("[%s] " fmt, __func__, ##arg)
 #define CAM_CALERR(fmt, arg...)    pr_debug("[%s] " fmt, __func__, ##arg)
 #else
-#define CAM_CALDB(x, ...)
+#define CAM_CALINF(fmt, arg...)
+#define CAM_CALDB(fmt, arg...)
+#define CAM_CALERR(fmt, arg...)
 #endif
 #define PAGE_SIZE_ 256
 #define BUFF_SIZE 8
@@ -107,7 +122,7 @@ static int iReadRegI2C(u8 *a_pSendData , u16 a_sizeSendData, u8 *a_pRecvData, u1
 	int  i4RetValue = 0;
 
 	spin_lock(&g_CAM_CALLock);
-	g_pstI2Cclient->addr = (i2cId >> 1);
+	g_pstI2Cclient->addr = i2cId;//(i2cId >> 1);
 	g_pstI2Cclient->ext_flag = (g_pstI2Cclient->ext_flag) & (~I2C_DMA_FLAG);
 
 
@@ -180,8 +195,9 @@ static bool selective_read_byte(u32 addr, u8 *data, u16 i2c_id)
 	u8 page = addr / PAGE_SIZE_; /* size of page was 256 */
 	u8 offset = addr % PAGE_SIZE_;
 	/*kdSetI2CSpeed(EEPROM_I2C_SPEED);*/
-
-	if (iReadRegI2C(&offset, 1, (u8 *)data, 1, i2c_id + (page << 1)) < 0) {
+	//leod add 1117
+	//if (iReadRegI2C(&offset, 1, (u8 *)data, 1, i2c_id + (page << 1)) < 0) {
+	if (iReadRegI2C(&offset, 1, (u8 *)data, 1, 0x50/*i2c_id*/ + page) < 0) {
 		CAM_CALERR("fail selective_read_byte addr =0x%x data = 0x%x,page %d, offset 0x%x",
 		 addr, *data, page, offset);
 		return false;
@@ -247,7 +263,8 @@ unsigned int cat24c16_selective_read_region(struct i2c_client *client, unsigned 
 	unsigned char *data, unsigned int size)
 {
 	g_pstI2Cclient = client;
-	if (selective_read_region(addr, data, g_pstI2Cclient->addr, size) == 0)
+	//if (selective_read_region(addr, data, g_pstI2Cclient->addr, size) == 0)
+	if (selective_read_region(addr, data, g_pstI2Cclient->addr, size) == size)
 		return size;
 	else
 		return 0;

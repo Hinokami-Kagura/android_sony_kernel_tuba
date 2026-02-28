@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _MT_SPM_VCORE_DVFS_H
 #define _MT_SPM_VCORE_DVFS_H
 
@@ -20,8 +33,13 @@
 	pr_debug(VCOREFS_SPM_TAG""fmt, ##args)
 
 #define spm_vcorefs_aee_warn(string, args...) do {\
+	pr_err("[WARN]"string, ##args); \
+	aee_kernel_warning(VCOREFS_SPM_TAG, "[WARN]"string, ##args);  \
+} while (0)
+
+#define spm_vcorefs_aee_exception(string, args...) do {\
 	pr_err("[ERR]"string, ##args); \
-	aee_kernel_warning(VCOREFS_SPM_TAG, "[ERR]"string, ##args);  \
+	aee_kernel_exception(VCOREFS_SPM_TAG, "[ERR]"string, ##args);  \
 } while (0)
 
 /* load fw for boot up */

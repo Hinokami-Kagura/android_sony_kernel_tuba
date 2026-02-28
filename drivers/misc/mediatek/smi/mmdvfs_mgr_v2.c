@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/uaccess.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
@@ -13,19 +26,15 @@
 
 #include <mt_vcorefs_manager.h>
 #include <mach/mt_freqhopping.h>
+#if defined(SMI_J)
+#include <mt_devinfo.h>
+#endif
 #include "mmdvfs_mgr.h"
 
 #undef pr_fmt
 #define pr_fmt(fmt) "[" MMDVFS_LOG_TAG "]" fmt
 
-/* MMDVFS SWITCH. NO MMDVFS for 6595 */
-#if IS_ENABLED(CONFIG_ARM64)
-/* 6795 */
 #define MMDVFS_ENABLE	1
-#else
-/* 6595 */
-#define MMDVFS_ENABLE	0
-#endif
 
 #if MMDVFS_ENABLE
 #ifndef MMDVFS_STANDALONE
@@ -53,6 +62,7 @@
 #define MMDVFS_PIXEL_NUM_2160P	(3840 * 2160)
 #define MMDVFS_PIXEL_NUM_1080P	(2100 * 1300)
 #define MMDVFS_PIXEL_NUM_2M		(2100 * 1300)
+#define MMDVFS_PIXEL_NUM_10M		(10000000)
 #define MMDVFS_PIXEL_NUM_13M		(13000000)
 #define MMDVFS_PIXEL_NUM_16M		(16000000)
 
@@ -61,13 +71,12 @@ typedef enum {
 	MMDVFS_LCD_SIZE_HD, MMDVFS_LCD_SIZE_FHD, MMDVFS_LCD_SIZE_WQHD, MMDVFS_LCD_SIZE_END_OF_ENUM
 } mmdvfs_lcd_size_enum;
 
-#if defined(MMDVFS_E1) && defined(SMI_J)
-/* For UT only */
-#define KIR_MM (KIR_MM_16MCAM)
-#define mt_dfs_general_pll(a, b) {}
-#endif /* defined(MMDVFS_E1) && defined(SMI_J) */
+#if defined(MMDVFS_E1)
+	#define MMDVFS_PIXEL_NUM_SENSOR_FULL (MMDVFS_PIXEL_NUM_10M)
+#else
+	#define MMDVFS_PIXEL_NUM_SENSOR_FULL (MMDVFS_PIXEL_NUM_13M)
+#endif /* defined(MMDVFS_E1) */
 
-#define MMDVFS_PIXEL_NUM_SENSOR_FULL (MMDVFS_PIXEL_NUM_13M)
 
 /* mmdvfs display sizes */
 #define MMDVFS_DISPLAY_SIZE_FHD	(1920 * 1216)
@@ -82,9 +91,12 @@ int update_mmsys_clk_mode, char *msg);
 static int mmdfvs_adjust_mmsys_clk_by_hopping(int clk_mode);
 static int mmdvfs_set_step_with_mmsys_clk(MTK_SMI_BWC_SCEN scenario, mmdvfs_voltage_enum step,
 int mmsys_clk_mode);
+static int mmdvfs_set_step_with_mmsys_clk_low_low(MTK_SMI_BWC_SCEN scenario, mmdvfs_voltage_enum step,
+int mmsys_clk_mode, int enable_low_low);
 static void notify_mmsys_clk_change(int ori_mmsys_clk_mode, int update_mmsys_clk_mode);
 static int mmsys_clk_change_notify_checked(clk_switch_cb func, int ori_mmsys_clk_mode,
 int update_mmsys_clk_mode, char *msg);
+static int determine_isp_clk(void);
 static mmdvfs_voltage_enum determine_current_mmsys_clk(void);
 static int get_venc_step(int venc_resolution);
 static int get_vr_step(int sensor_size, int camera_mode);
@@ -96,6 +108,8 @@ static int get_smvr_step_avc(int resolution, int is_p_mode, int fps);
 static int get_smvr_step_hevc(int resolution, int is_p_mode, int fps);
 static int get_smvr_step(int is_hevc, int resolution, int is_p_mode, int fps);
 #endif /* MMDVFS_E1 */
+
+
 
 static int is_cam_monior_work;
 
@@ -112,6 +126,10 @@ static mmdvfs_voltage_enum g_mmdvfs_current_step;
 static unsigned int g_mmdvfs_concurrency;
 static MTK_SMI_BWC_MM_INFO *g_mmdvfs_info;
 static MTK_MMDVFS_CMD g_mmdvfs_cmd;
+/* only for ddr800 */
+static unsigned int g_disp_low_low_request;
+static unsigned int g_disp_is_ui_idle;
+
 
 /* mmdvfs timer for monitor gpu loading */
 typedef struct {
@@ -129,8 +147,13 @@ typedef struct {
 
 typedef struct {
 	spinlock_t scen_lock;
+	int is_vp_high_fps_enable;
 	int is_mhl_enable;
 	int is_wfd_enable;
+	int is_mjc_enable;
+	int is_boost_disable;
+	int is_lpddr4;
+	int step_concurrency[MMDVFS_VOLTAGE_COUNT];
 	mmdvfs_gpu_monitor_struct gpu_monitor;
 
 } mmdvfs_context_struct;
@@ -146,7 +169,8 @@ typedef enum {
 /* HIGH */
 } mmdvfs_step_enum;
 
-
+static int check_if_enter_low_low(int low_low_request, int final_step, int current_scenarios, int lcd_resolution,
+int venc_resolution, mmdvfs_context_struct *mmdvfs_mgr_cntx, int is_ui_idle);
 
 static mmdvfs_context_struct g_mmdvfs_mgr_cntx;
 static mmdvfs_context_struct * const g_mmdvfs_mgr = &g_mmdvfs_mgr_cntx;
@@ -213,8 +237,7 @@ MTK_MMDVFS_CMD *cmd)
 		if (cmd->sensor_size >= MMDVFS_PIXEL_NUM_SENSOR_FULL)
 			/* 13M high */
 			step = MMSYS_CLK_HIGH;
-		else if (cmd->camera_mode & (MMDVFS_CAMERA_MODE_FLAG_PIP |
-			MMDVFS_CAMERA_MODE_FLAG_STEREO | MMDVFS_CAMERA_MODE_FLAG_IVHDR))
+		else if (cmd->camera_mode & (MMDVFS_CAMERA_MODE_FLAG_PIP | MMDVFS_CAMERA_MODE_FLAG_STEREO))
 			/* PIP for ISP clock */
 			step = MMSYS_CLK_HIGH;
 		break;
@@ -262,9 +285,6 @@ MTK_MMDVFS_CMD *cmd)
 	switch (scenario) {
 
 	case SMI_BWC_SCEN_VR:
-		if (is_force_camera_hpm())
-			step = MMDVFS_VOLTAGE_HIGH;
-		else
 			step = query_vr_step(cmd);
 		break;
 	case SMI_BWC_SCEN_VR_SLOW:
@@ -291,10 +311,26 @@ MTK_MMDVFS_CMD *cmd)
 	return step;
 }
 
-/* Check all scenario in HPM and return the corrosponding mmsys
-	clk conciguration setting. This is only need in SMI_J since mmysys
-	clk can't be configured independently in SMI_E */
-static mmdvfs_voltage_enum determine_current_mmsys_clk(void)
+
+static int determine_isp_clk(void)
+{
+		int final_clk = MMSYS_CLK_MEDIUM;
+
+		/* exclude MMDVFS_CAM_MON_SCEN case since it is not the final step */
+		if (is_force_max_mmsys_clk())
+				final_clk = MMSYS_CLK_HIGH;
+		else if (g_mmdvfs_cmd.sensor_size >= MMDVFS_PIXEL_NUM_SENSOR_FULL)
+				/* 13M high */
+				final_clk = MMSYS_CLK_HIGH;
+		else if (g_mmdvfs_cmd.camera_mode & (MMDVFS_CAMERA_MODE_FLAG_PIP |
+		MMDVFS_CAMERA_MODE_FLAG_STEREO))
+				/* PIP for ISP clock */
+				final_clk = MMSYS_CLK_HIGH;
+
+		return final_clk;
+}
+
+int mmdvfs_get_stable_isp_clk(void)
 {
 	int i = 0;
 	int final_clk = MMSYS_CLK_MEDIUM;
@@ -304,16 +340,7 @@ static mmdvfs_voltage_enum determine_current_mmsys_clk(void)
 			/* Check the mmsys clk */
 			switch (i) {
 			case SMI_BWC_SCEN_VR:
-			case MMDVFS_CAM_MON_SCEN:
-				if (is_force_max_mmsys_clk())
-					final_clk = MMSYS_CLK_HIGH;
-				else if (g_mmdvfs_cmd.sensor_size >= MMDVFS_PIXEL_NUM_SENSOR_FULL)
-					/* 13M high */
-					final_clk = MMSYS_CLK_HIGH;
-				else if (g_mmdvfs_cmd.camera_mode & (MMDVFS_CAMERA_MODE_FLAG_PIP |
-				MMDVFS_CAMERA_MODE_FLAG_STEREO | MMDVFS_CAMERA_MODE_FLAG_IVHDR))
-					/* PIP for ISP clock */
-					final_clk = MMSYS_CLK_HIGH;
+					final_clk = determine_isp_clk();
 				break;
 			case SMI_BWC_SCEN_VR_SLOW:
 			case SMI_BWC_SCEN_ICFP:
@@ -326,6 +353,27 @@ static mmdvfs_voltage_enum determine_current_mmsys_clk(void)
 	}
 
 	return final_clk;
+}
+
+/* Check all scenario in HPM and return the corrosponding mmsys
+	clk conciguration setting. This is only need in SMI_J since mmysys
+	clk can't be configured independently in SMI_E */
+static mmdvfs_voltage_enum determine_current_mmsys_clk(void)
+{
+	int temp_clk = MMSYS_CLK_MEDIUM;
+	int stable_clk = MMSYS_CLK_MEDIUM;
+
+	/* Get temp clk triggered by camera monitor */
+	if (g_mmdvfs_scenario_voltage[MMDVFS_CAM_MON_SCEN] == MMDVFS_VOLTAGE_HIGH)
+		temp_clk = determine_isp_clk();
+
+	/* Get final stable clk */
+	stable_clk = mmdvfs_get_stable_isp_clk();
+
+	if (temp_clk == MMSYS_CLK_HIGH || stable_clk == MMSYS_CLK_HIGH)
+		return MMSYS_CLK_HIGH;
+	else
+		return MMSYS_CLK_MEDIUM;
 }
 
 
@@ -446,8 +494,7 @@ static void mmdvfs_start_cam_monitor(int scen, int delay_hz)
 	if (is_force_max_mmsys_clk())
 		delayed_mmsys_state = MMSYS_CLK_HIGH;
 	if ((scen == SMI_BWC_SCEN_ICFP || scen == SMI_BWC_SCEN_VR_SLOW || scen == SMI_BWC_SCEN_VR) &&
-			(g_mmdvfs_cmd.camera_mode & (MMDVFS_CAMERA_MODE_FLAG_PIP | MMDVFS_CAMERA_MODE_FLAG_STEREO
-			| MMDVFS_CAMERA_MODE_FLAG_IVHDR )))
+			(g_mmdvfs_cmd.camera_mode & (MMDVFS_CAMERA_MODE_FLAG_PIP | MMDVFS_CAMERA_MODE_FLAG_STEREO)))
 		delayed_mmsys_state = MMSYS_CLK_HIGH;
 	else if (current_mmsys_clk == MMSYS_CLK_LOW)
 			delayed_mmsys_state = MMSYS_CLK_MEDIUM;
@@ -512,15 +559,9 @@ int mmdvfs_set_step(MTK_SMI_BWC_SCEN scenario, mmdvfs_voltage_enum step)
 
 static int get_venc_step(int venc_resolution)
 {
-	int lpm_size_limit = 0;
-	int venc_step = MMDVFS_VOLTAGE_LOW;
+	int lpm_size_limit = 4096 * 1716;
 
-	if (mmdvfs_get_lcd_resolution() == MMDVFS_LCD_SIZE_WQHD)
-		/* initialize the venc_size_limit */
-		lpm_size_limit = 1920 * 1080;
-	else
-		/* initialize the venc_size_limit */
-		lpm_size_limit = 4096 * 1716;
+	int venc_step = MMDVFS_VOLTAGE_LOW;
 
 	/* Check recording video resoltuion */
 	if (venc_resolution >= lpm_size_limit)
@@ -560,8 +601,7 @@ static int get_vr_step(int sensor_size, int camera_mode)
 
 	} else {
 		hpm_cam_mode = (MMDVFS_CAMERA_MODE_FLAG_PIP | MMDVFS_CAMERA_MODE_FLAG_VFB
-		| MMDVFS_CAMERA_MODE_FLAG_EIS_2_0 | MMDVFS_CAMERA_MODE_FLAG_STEREO
-		| MMDVFS_CAMERA_MODE_FLAG_IVHDR);
+		| MMDVFS_CAMERA_MODE_FLAG_EIS_2_0 | MMDVFS_CAMERA_MODE_FLAG_STEREO);
 	}
 
 	/* Check sensor size */
@@ -572,6 +612,10 @@ static int get_vr_step(int sensor_size, int camera_mode)
 	if (camera_mode & hpm_cam_mode)
 		vr_step = MMDVFS_VOLTAGE_HIGH;
 
+	/* forced hpm camera mode */
+	if (is_force_camera_hpm())
+		vr_step = MMDVFS_VOLTAGE_HIGH;
+
 	return vr_step;
 }
 
@@ -579,7 +623,10 @@ static int get_vr_step(int sensor_size, int camera_mode)
 static int query_vr_step(MTK_MMDVFS_CMD *query_cmd)
 {
 	if (query_cmd == NULL)
-		return MMDVFS_VOLTAGE_LOW;
+		if (is_force_camera_hpm())
+			return MMDVFS_VOLTAGE_HIGH;
+		else
+			return MMDVFS_VOLTAGE_LOW;
 	else
 		return get_vr_step(query_cmd->sensor_size, query_cmd->camera_mode);
 
@@ -642,6 +689,12 @@ In SMI_E1 project, the mmsys clk is determined by voltage directly
 and can't be configure indepdently. */
 int mmdvfs_set_step_with_mmsys_clk(MTK_SMI_BWC_SCEN smi_scenario, mmdvfs_voltage_enum step, int mmsys_clk_mode_request)
 {
+	return mmdvfs_set_step_with_mmsys_clk_low_low(smi_scenario, step, mmsys_clk_mode_request, 1);
+}
+
+int mmdvfs_set_step_with_mmsys_clk_low_low(MTK_SMI_BWC_SCEN smi_scenario, mmdvfs_voltage_enum step,
+	int mmsys_clk_mode_request, int enable_low_low)
+{
 	int i, scen_index;
 	unsigned int concurrency;
 	unsigned int scenario = smi_scenario;
@@ -653,6 +706,23 @@ int mmdvfs_set_step_with_mmsys_clk(MTK_SMI_BWC_SCEN smi_scenario, mmdvfs_voltage
 		MMDVFSMSG("MMDVFS is disable, request denalied; scen:%d, vol:%d, clk:%d\n",
 		scenario, step, mmsys_clk_mode_request);
 		return 0;
+	}
+
+	if (smi_scenario == ((int)MMDVFS_SCEN_DISP) || smi_scenario == (int)SMI_BWC_SCEN_UI_IDLE) {
+
+		if (smi_scenario == (int)SMI_BWC_SCEN_UI_IDLE) {
+			if (step == MMDVFS_VOLTAGE_LOW_LOW)
+				g_disp_is_ui_idle = 1;
+			else
+				g_disp_is_ui_idle = 0;
+		}
+
+		if (step == MMDVFS_VOLTAGE_LOW_LOW) {
+			g_disp_low_low_request = 1;
+			step = MMDVFS_VOLTAGE_LOW;
+		}	else {
+			g_disp_low_low_request = 0;
+		}
 	}
 
 #if !defined(MMDVFS_E1)
@@ -716,6 +786,13 @@ int mmdvfs_set_step_with_mmsys_clk(MTK_SMI_BWC_SCEN smi_scenario, mmdvfs_voltage
 	else
 		mmsys_clk_mode = mmsys_clk_mode_request;
 
+	if (enable_low_low && check_if_enter_low_low(g_disp_low_low_request, final_step,
+			g_mmdvfs_concurrency, mmdvfs_get_lcd_resolution(),
+			g_mmdvfs_info->video_record_size[0] * g_mmdvfs_info->video_record_size[1],
+			g_mmdvfs_mgr, g_disp_is_ui_idle)) {
+		final_step = MMDVFS_VOLTAGE_LOW_LOW;
+	}
+
 	g_mmdvfs_current_step = final_step;
 
 	spin_unlock(&g_mmdvfs_mgr->scen_lock);
@@ -730,39 +807,52 @@ int mmdvfs_set_step_with_mmsys_clk(MTK_SMI_BWC_SCEN smi_scenario, mmdvfs_voltage
 			mmdvfs_vcorefs_request_dvfs_opp(KIR_MM, OPPI_PERF);
 			mmdfvs_adjust_mmsys_clk_by_hopping(MMSYS_CLK_HIGH);
 		#else
-			if (scenario == MMDVFS_SCEN_MHL)
+			/* Set step for MHL, WFD and 16M kicker */
+			if (g_mmdvfs_scenario_voltage[MMDVFS_SCEN_MHL] == MMDVFS_VOLTAGE_HIGH)
 				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_MHL, OPPI_PERF);
-			else if (scenario == SMI_BWC_SCEN_WFD)
+			else
+				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_MHL, OPPI_UNREQ);
+
+			if (g_mmdvfs_scenario_voltage[SMI_BWC_SCEN_WFD] == MMDVFS_VOLTAGE_HIGH)
 				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_WFD, OPPI_PERF);
-			else {
+			else
+				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_WFD, OPPI_UNREQ);
+
+			if (concurrency & ~((1 << MMDVFS_SCEN_MHL) | (1 << SMI_BWC_SCEN_WFD)))
 				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_16MCAM, OPPI_PERF);
-				mmdfvs_adjust_mmsys_clk_by_hopping(mmsys_clk_mode);
-			}
+			else
+				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_16MCAM, OPPI_UNREQ);
+
+			/* Config MM clocks */
+			if (mmsys_clk_mode == MMSYS_CLK_HIGH)
+				mmdfvs_adjust_mmsys_clk_by_hopping(MMSYS_CLK_HIGH);
+			else
+				mmdfvs_adjust_mmsys_clk_by_hopping(MMSYS_CLK_MEDIUM);
 		#endif /* MMDVFS_E1 */
-	}	else{
+	}	else {
 		#ifdef MMDVFS_E1
 			mmdfvs_adjust_mmsys_clk_by_hopping(MMSYS_CLK_MEDIUM);
-			mmdvfs_vcorefs_request_dvfs_opp(KIR_MM, OPPI_UNREQ);
+
+			if (final_step == MMDVFS_VOLTAGE_LOW_LOW) {
+				MMDVFSMSG("Enter low_low mode\n");
+				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM, OPPI_ULTRA_LOW_PWR);
+			} else {
+				mmdvfs_vcorefs_request_dvfs_opp(KIR_MM, OPPI_UNREQ);
+			}
 		#else
-		if (scenario == MMDVFS_SCEN_MHL)
-			mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_MHL, OPPI_UNREQ);
-		else if (scenario == SMI_BWC_SCEN_WFD)
-			mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_WFD, OPPI_UNREQ);
-		else {
-		  /* must lower the mmsys clk before enter LPM mode */
 			mmdfvs_adjust_mmsys_clk_by_hopping(MMSYS_CLK_MEDIUM);
 			mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_16MCAM, OPPI_UNREQ);
-		}
+			mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_MHL, OPPI_UNREQ);
+			mmdvfs_vcorefs_request_dvfs_opp(KIR_MM_WFD, OPPI_UNREQ);
 		#endif /* MMDVFS_E1 */
 	}
 #endif /* MMDVFS_ENABLE */
 
-	MMDVFSMSG("Set vol scen:%d,step:%d,final:%d(0x%x),CMD(%d,%d,0x%x),INFO(%d,%d),CLK:%d\n",
-	scenario, step, final_step, concurrency,
-	g_mmdvfs_cmd.sensor_size, g_mmdvfs_cmd.sensor_fps, g_mmdvfs_cmd.camera_mode,
-	g_mmdvfs_info->video_record_size[0], g_mmdvfs_info->video_record_size[1],
-	current_mmsys_clk);
-
+	MMDVFSMSG("Set scen:(%d,0x%x) step:(%d,%d,%d,0x%x),CMD(%d,%d,0x%x),INFO(%d,%d),CLK:%d,low_low_en:%d\n",
+		scenario, g_mmdvfs_concurrency, step, g_disp_low_low_request, final_step, concurrency,
+		g_mmdvfs_cmd.sensor_size, g_mmdvfs_cmd.sensor_fps, g_mmdvfs_cmd.camera_mode,
+		g_mmdvfs_info->video_record_size[0], g_mmdvfs_info->video_record_size[1],
+		current_mmsys_clk, enable_low_low);
 
 	return 0;
 }
@@ -781,7 +871,7 @@ void mmdvfs_handle_cmd(MTK_MMDVFS_CMD *cmd)
 		mmdvfs_update_cmd(cmd);
 
 		if (!(g_mmdvfs_concurrency & (1 << cmd->scen))) {
-			MMDVFSMSG("invalid set scen %d\n", cmd->scen);
+			/*MMDVFSMSG("invalid set scen %d\n", cmd->scen); */
 			cmd->ret = -1;
 		} else {
 			cmd->ret = mmdvfs_set_step_with_mmsys_clk(cmd->scen,
@@ -830,11 +920,15 @@ void mmdvfs_notify_scenario_exit(MTK_SMI_BWC_SCEN scen)
 	if (scen == SMI_BWC_SCEN_WFD)
 		g_mmdvfs_mgr->is_wfd_enable = 0;
 
+	if (scen == SMI_BWC_SCEN_VP_HIGH_FPS)
+		g_mmdvfs_mgr->is_vp_high_fps_enable = 0;
+
 	if ((scen == SMI_BWC_SCEN_VR) || (scen == SMI_BWC_SCEN_VR_SLOW) || (scen == SMI_BWC_SCEN_ICFP))
 		mmdvfs_start_cam_monitor(scen, 8);
 
 	/* reset scenario voltage to default when it exits */
-	mmdvfs_set_step(scen, mmdvfs_get_default_step());
+	/* Also force the system to leave low low mode */
+	mmdvfs_set_step_with_mmsys_clk_low_low(scen, mmdvfs_get_default_step(), MMSYS_CLK_MEDIUM, 0);
 }
 
 void mmdvfs_notify_scenario_enter(MTK_SMI_BWC_SCEN scen)
@@ -846,18 +940,6 @@ void mmdvfs_notify_scenario_enter(MTK_SMI_BWC_SCEN scen)
 	return;
 #endif
 
-	if (scen == SMI_BWC_SCEN_VR && is_force_camera_hpm()) {
-		/* currently we set mmsys clk medium in default
-		when force_camera_hpm is enabled */
-		int mmsys_clk_request = MMSYS_CLK_MEDIUM;
-
-		if (is_force_max_mmsys_clk())
-			mmsys_clk_request = MMSYS_CLK_HIGH;
-
-		mmdvfs_set_step_with_mmsys_clk(scen, MMDVFS_VOLTAGE_HIGH, mmsys_clk_request);
-		return;
-	}
-
 	/* Leave display idle mode before set scenario */
 	if (current_mmsys_clk == MMSYS_CLK_LOW && scen != SMI_BWC_SCEN_NORMAL)
 		mmdvfs_raise_mmsys_by_mux();
@@ -867,6 +949,9 @@ void mmdvfs_notify_scenario_enter(MTK_SMI_BWC_SCEN scen)
 		mmdvfs_start_cam_monitor(scen, 8);
 
 	switch (scen) {
+	case SMI_BWC_SCEN_VP_HIGH_FPS:
+		g_mmdvfs_mgr->is_vp_high_fps_enable = 1;
+		break;
 	case SMI_BWC_SCEN_VENC:
 		if (g_mmdvfs_concurrency & (1 << SMI_BWC_SCEN_VR))
 			mmdvfs_set_step(scen, get_venc_step(g_mmdvfs_info->video_record_size[0] *
@@ -899,6 +984,7 @@ void mmdvfs_notify_scenario_enter(MTK_SMI_BWC_SCEN scen)
 				}
 			break;
 		}
+	case SMI_BWC_SCEN_VP_HIGH_RESOLUTION:
 	case SMI_BWC_SCEN_VR_SLOW:
 	case SMI_BWC_SCEN_ICFP:
 		mmdvfs_set_step_with_mmsys_clk(scen, MMDVFS_VOLTAGE_HIGH, MMSYS_CLK_HIGH);
@@ -913,6 +999,18 @@ void mmdvfs_init(MTK_SMI_BWC_MM_INFO *info)
 {
 #if !MMDVFS_ENABLE
 	return;
+#endif
+
+#if defined(SMI_J)
+	if (!is_mmdvfs_disabled()) {
+		/* get platform info */
+		unsigned int profile_id;
+
+		profile_id = get_devinfo_with_index(21) & 0xff;
+		if (profile_id == 0x42 || profile_id == 0x43 || profile_id == 0x46 ||
+				profile_id == 0x4B)
+			mmdvfs_enable(0);
+	}
 #endif
 
 	spin_lock_init(&g_mmdvfs_mgr->scen_lock);
@@ -934,6 +1032,11 @@ void mmdvfs_mhl_enable(int enable)
 		mmdvfs_set_step(MMDVFS_SCEN_MHL, get_ext_disp_step(mmdvfs_get_lcd_resolution()));
 	else
 		mmdvfs_set_step(MMDVFS_SCEN_MHL, MMDVFS_VOLTAGE_DEFAULT_STEP);
+}
+
+void mmdvfs_mjc_enable(int enable)
+{
+	g_mmdvfs_mgr->is_mjc_enable = enable;
 }
 
 void mmdvfs_notify_scenario_concurrency(unsigned int u4Concurrency)
@@ -1124,6 +1227,82 @@ static int notify_cb_func_checked(clk_switch_cb func, int ori_mmsys_clk_mode, in
 	return 0;
 }
 
+
+/* Only for DDR 800 */
+static int check_if_enter_low_low(int low_low_request, int final_step, int current_scenarios, int lcd_resolution,
+int venc_resolution, mmdvfs_context_struct *mmdvfs_mgr_cntx, int is_ui_idle){
+
+	if (final_step == MMDVFS_VOLTAGE_HIGH) {
+		MMDVFSMSG("Didn't enter low low step due to final step is high\n");
+		return 0;
+	}
+
+	/* WFD and HML check, it is a specfial case which is not recorded with MTK_SMI_BWC_SCEN */
+	if (mmdvfs_mgr_cntx->is_wfd_enable || mmdvfs_mgr_cntx->is_mhl_enable
+		|| mmdvfs_mgr_cntx->is_mjc_enable || mmdvfs_mgr_cntx->is_vp_high_fps_enable) {
+		MMDVFSMSG("Didn't enter low low step, MHL/WFD/MJC/vp60fps is enabled: (%d,%d,%d,%d)\n",
+		mmdvfs_mgr_cntx->is_wfd_enable, mmdvfs_mgr_cntx->is_mhl_enable,
+		mmdvfs_mgr_cntx->is_mjc_enable,  mmdvfs_mgr_cntx->is_vp_high_fps_enable);
+		return 0;
+	}
+
+	/* VSS, ICP and SMVR can't enter low low mode */
+	if (0 != (current_scenarios & ((1 << SMI_BWC_SCEN_MM_GPU) | (1 << SMI_BWC_SCEN_ICFP)|
+		(1 << SMI_BWC_SCEN_VSS) | (1 << SMI_BWC_SCEN_VR_SLOW)))) {
+		MMDVFSMSG("Didn't enter low low step in VSS,ICFP,SMVR, and GPU: 0x%x\n", current_scenarios);
+		return 0;
+	}
+
+	/* Only allowd VP, VR or UI idle*/
+	/* Return if vp or vr are not selected and it is not in UI idle mode*/
+	if (((current_scenarios & ((1 << SMI_BWC_SCEN_VP) | (1 << SMI_BWC_SCEN_VR))) == 0)
+			&& !(current_scenarios == 0 && is_ui_idle == 1)) {
+		MMDVFSMSG("Didn't enter low low step, only allow VP, VR and UI idle: 0x%x, %d\n",
+		current_scenarios, is_ui_idle);
+		return 0;
+	}
+
+
+	/* If it is camera VR, check resolution and venc size*/
+	if (current_scenarios & ((1 << SMI_BWC_SCEN_VR) | (1 << SMI_BWC_SCEN_VENC))) {
+		/* WQHD LCD: can't enter low low */
+		if (lcd_resolution == MMDVFS_LCD_SIZE_WQHD) {
+			MMDVFSMSG("Didn't enter low low step in VR with WQHD resolution:%d\n",
+			lcd_resolution);
+			return 0;
+		}
+
+		/* venc size < */
+		if (venc_resolution > 1920 * 1088) {
+			MMDVFSMSG("Didn't enter low low step in VR when venc resolution > 1080p:%d\n",
+			venc_resolution);
+			return 0;
+		} else {
+			return 1;
+		}
+	}
+
+	/* If it is VP, check the low_low_request only */
+	if (current_scenarios & (1 << SMI_BWC_SCEN_VP)) {
+		if (low_low_request == 1)
+			return 1;
+		MMDVFSMSG("No low low requested from DISP in VP\n");
+		return 0;
+	}
+
+	/* If it is UI idle, check the low_low_request only */
+	if ((current_scenarios == 0) && (is_ui_idle == 1)) {
+		if (low_low_request == 1)
+			return 1;
+		MMDVFSMSG("No low low requested from DISP in idle mode\n");
+		return 0;
+	}
+
+	MMDVFSMSG("No set low low in this scenario: 0x%x\n", current_scenarios);
+	return 0;
+
+}
+
 /* This desing is only for CLK Mux switch relate flows */
 int mmdvfs_notify_mmclk_switch_request(int event)
 {
@@ -1198,7 +1377,8 @@ int update_mmsys_clk_mode, char *msg)
 		MMDVFSMSG("notify_cb_func is NULL, not invoked: %s, (%d,%d)\n", msg, ori_mmsys_clk_mode,
 		update_mmsys_clk_mode);
 	} else {
-		MMDVFSMSG("notify_cb_func: %s, (%d,%d)\n", msg, ori_mmsys_clk_mode, update_mmsys_clk_mode);
+		/* MMDVFSMSG("notify_cb_func: %s, (%d,%d)\n", msg, ori_mmsys_clk_mode,
+		update_mmsys_clk_mode); */
 		func(ori_mmsys_clk_mode, update_mmsys_clk_mode);
 		return 1;
 	}

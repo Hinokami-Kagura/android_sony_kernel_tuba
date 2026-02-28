@@ -1,7 +1,14 @@
 /*
-* Copyright(C)2014 MediaTek Inc.
-* Modification based on code covered by the below mentioned copyright
-* and/or permission notice(S).
+* Copyright (C) 2014 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
 */
 
 
@@ -64,6 +71,8 @@
 #define SENSOR_STRING_TYPE_BRINGTOSEE               "android.sensor.bring_to_see"
 #define SENSOR_TYPE_ANSWER_CALL          (44)
 #define SENSOR_STRING_TYPE_ANSWERCALL               "android.sensor.answer_call"
+#define SENSOR_TYPE_STATIONARY          (45)
+#define SENSOR_STRING_TYPE_STATIONARY               "android.sensor.stationary"
 
 /*---------------------------------------------------------------------------*/
 #define ID_BASE							0
@@ -95,7 +104,7 @@
 #define ID_PICK_UP_GESTURE				(ID_BASE+SENSOR_TYPE_PICK_UP_GESTURE-1)
 #define ID_WRIST_TITL_GESTURE      (ID_BASE+SENSOR_TYPE_WRIST_TILT_GESTURE-1)
 
-#define ID_PEDOMETER                    (ID_BASE+SENSOR_TYPE_PEDOMETER-1)
+#define ID_PEDOMETER                                    (ID_BASE+SENSOR_TYPE_PEDOMETER-1)
 #define ID_IN_POCKET                    (ID_BASE+SENSOR_TYPE_IN_POCKET-1)
 #define ID_ACTIVITY                     (ID_BASE+SENSOR_TYPE_ACTIVITY-1)
 #define ID_PDR							(ID_BASE+SENSOR_TYPE_PDR-1)
@@ -106,10 +115,12 @@
 #define ID_SHAKE                                        (ID_BASE+SENSOR_TYPE_SHAKE-1)
 #define ID_BRINGTOSEE                                   (ID_BASE+SENSOR_TYPE_BRINGTOSEE-1)
 #define ID_ANSWER_CALL                                   (ID_BASE+SENSOR_TYPE_ANSWER_CALL-1)
-#define ID_SENSOR_MAX_HANDLE	  (ID_BASE+SENSOR_TYPE_BRINGTOSEE)
+#define ID_STATIONARY                                   (ID_BASE+SENSOR_TYPE_STATIONARY-1)
+#define ID_SENSOR_MAX_HANDLE	  (ID_BASE+SENSOR_TYPE_STATIONARY-1)
 #define ID_NONE							    (ID_SENSOR_MAX_HANDLE+1)
 
 #define ID_OFFSET                           (1)
+#define ID_SCP_MAX_SENSOR_TYPE				(57)
 
 #define MAX_ANDROID_SENSOR_NUM	(ID_SENSOR_MAX_HANDLE+1)
 #define MAX_SENSOR_DATA_UPDATE_ONCE         (20)
@@ -277,7 +288,9 @@
 #define PEDO_INPUTDEV_NAME               "m_pedo_input"
 #define PEDO_MISC_DEV_NAME               "m_pedo_misc"
 
-
+#define GES_PL_DEV_NAME                 "m_ges_pl"
+#define GES_INPUTDEV_NAME               "m_ges_input"
+#define GES_MISC_DEV_NAME               "m_ges_misc"
 
 #define EVENT_TYPE_SENSOR				0x01
 #define EVENT_TYPE_SENSOR_EXT				0x02
@@ -292,6 +305,8 @@
 #define EVENT_SENSOR_GRAVITY			SENSOR_PRESSURE
 #define EVENT_SENSOR_LINEAR_ACCELERATION		SENSOR_TEMPRERATURE
 #define EVENT_SENSOR_ROTATION_VECTOR	SENSOR_PROXIMITY
+#define EVENT_TYPE_INPK_VALUE            0x1
+#define EVENT_TYPE_STATIONARY_VALUE      0x2
 //henry add
 //#define EVENT_SENSOR_MAGNETIC_FIELD_UNCALIBRATED	SENSOR_MAGNETIC_UNCALIBRATED
 
@@ -307,7 +322,10 @@ struct hwm_sensor_data {
 	/* sensor identifier */
 	int sensor;
 	/* sensor values */
-	int	values[6];
+	union {
+		int values[6];
+		uint8_t probability[12];
+	};
 	/* sensor values divide */
 	uint32_t value_divide;
 	/* sensor accuracy */
@@ -325,7 +343,10 @@ struct compat_hwm_sensor_data {
 	/* sensor identifier */
 	compat_int_t sensor;
 	/* sensor values */
-	compat_int_t	values[6];
+	union {
+		compat_int_t	values[6];
+		uint8_t probability[12];
+	};
 	/* sensor values divide */
 	compat_uint_t value_divide;
 	/* sensor accuracy */

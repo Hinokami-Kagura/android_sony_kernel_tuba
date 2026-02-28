@@ -1149,11 +1149,12 @@ restart:
 	}
 
 #ifdef CONFIG_MTK_NET_LOGGING
-	if ((SOCK_INODE(sock) != NULL) && (sunaddr != NULL) && (other->sk_socket != NULL) &&
-	    (SOCK_INODE(other->sk_socket) != NULL)) {
-		pr_debug("[mtk_net][socket]unix_dgram_connect[%lu]:connect [%s] other:[%lu]\n",
-			 SOCK_INODE(sock)->i_ino, sunaddr->sun_path,
-			 SOCK_INODE(other->sk_socket)->i_ino);
+	if ((SOCK_INODE(sock) != NULL) && (sunaddr != NULL) && (other != NULL) && (other->sk_socket != NULL) &&
+	     (SOCK_INODE(other->sk_socket) != NULL)) {
+		if (!strstr(sunaddr->sun_path, "logdw")) {
+			pr_info("[mtk_net][socket]unix_dgram_connect[%lu]:connect [%s] other:[%lu]\n",
+				SOCK_INODE(sock)->i_ino, sunaddr->sun_path, SOCK_INODE(other->sk_socket)->i_ino);
+		}
 	}
 #endif
 
@@ -1166,11 +1167,45 @@ out:
 	return err;
 }
 
+#ifdef CONFIG_MTK_NET_LOGGING
+struct wait_for_peer_info_t {
+	char *process;
+	int pid;
+	unsigned long long when;
+};
+
+static void print_wait_peer_sock_info(unsigned long data)
+{
+	struct wait_for_peer_info_t *wait_info = (struct wait_for_peer_info_t *)data;
+	unsigned long long time = jiffies - wait_info->when;
+
+	/*Compatible 32bit projet and 64 bit project*/
+	do_div(time, HZ);
+	pr_info("----------------------wait for peer block info-----------------------\n");
+	pr_info("[mtk_net][sock]sockdbg %s[%d] is blocking because wait for peer more than %lld sec\n",
+		wait_info->process, wait_info->pid, time);
+}
+#endif
+
 static long unix_wait_for_peer(struct sock *other, long timeo)
 {
 	struct unix_sock *u = unix_sk(other);
 	int sched;
 	DEFINE_WAIT(wait);
+
+#ifdef CONFIG_MTK_NET_LOGGING
+	struct timer_list wait_peer_timer;
+	struct wait_for_peer_info_t wait_sk_info;
+
+	wait_sk_info.pid = current->pid;
+	wait_sk_info.process = current->comm;
+	wait_sk_info.when = jiffies;
+	init_timer(&wait_peer_timer);
+	wait_peer_timer.function = print_wait_peer_sock_info;
+	wait_peer_timer.expires = jiffies + 10*HZ;
+	wait_peer_timer.data = (unsigned long)&wait_sk_info;
+	add_timer(&wait_peer_timer);
+#endif
 
 	prepare_to_wait_exclusive(&u->peer_wait, &wait, TASK_INTERRUPTIBLE);
 
@@ -1184,6 +1219,10 @@ static long unix_wait_for_peer(struct sock *other, long timeo)
 		timeo = schedule_timeout(timeo);
 
 	finish_wait(&u->peer_wait, &wait);
+#ifdef CONFIG_MTK_NET_LOGGING
+	del_timer(&wait_peer_timer);
+#endif
+
 	return timeo;
 }
 
@@ -1348,12 +1387,14 @@ restart:
 
 #ifdef CONFIG_MTK_NET_LOGGING
 	if ((SOCK_INODE(sock) != NULL) && (sunaddr != NULL) && (other->sk_socket != NULL) &&
-	    (SOCK_INODE(other->sk_socket) != NULL)) {
-		unsigned long sk_ino = SOCK_INODE(sock)->i_ino;
-		unsigned long other_ino = SOCK_INODE(other->sk_socket)->i_ino;
+		(SOCK_INODE(other->sk_socket) != NULL)) {
+			unsigned long sk_ino = SOCK_INODE(sock)->i_ino;
+			unsigned long other_ino = SOCK_INODE(other->sk_socket)->i_ino;
 
-		pr_debug("[mtk_net][socket]unix_stream_connect[%lu ]: connect [%s] other[%lu]\n",
-			 sk_ino, sunaddr->sun_path, other_ino);
+			if (!strstr(sunaddr->sun_path, "property_service") && !strstr(sunaddr->sun_path, "fwmarkd")) {
+				pr_info("[mtk_net][socket]unix_stream_connect[%lu ]: connect [%s] other[%lu]\n",
+					sk_ino, sunaddr->sun_path, other_ino);
+			}
 	}
 #endif
 
@@ -1509,6 +1550,21 @@ static void unix_destruct_scm(struct sk_buff *skb)
 	sock_wfree(skb);
 }
 
+/*
+ * The "user->unix_inflight" variable is protected by the garbage
+ * collection lock, and we just read it locklessly here. If you go
+ * over the limit, there might be a tiny race in actually noticing
+ * it across threads. Tough.
+ */
+static inline bool too_many_unix_fds(struct task_struct *p)
+{
+	struct user_struct *user = current_user();
+
+	if (unlikely(user->unix_inflight > task_rlimit(p, RLIMIT_NOFILE)))
+		return !capable(CAP_SYS_RESOURCE) && !capable(CAP_SYS_ADMIN);
+	return false;
+}
+
 #define MAX_RECURSION_LEVEL 4
 
 static int unix_attach_fds(struct scm_cookie *scm, struct sk_buff *skb)
@@ -1516,6 +1572,9 @@ static int unix_attach_fds(struct scm_cookie *scm, struct sk_buff *skb)
 	int i;
 	unsigned char max_level = 0;
 	int unix_sock_count = 0;
+
+	if (too_many_unix_fds(current))
+		return -ETOOMANYREFS;
 
 	for (i = scm->fp->count - 1; i >= 0; i--) {
 		struct sock *sk = unix_get_socket(scm->fp->fp[i]);
@@ -1538,10 +1597,8 @@ static int unix_attach_fds(struct scm_cookie *scm, struct sk_buff *skb)
 	if (!UNIXCB(skb).fp)
 		return -ENOMEM;
 
-	if (unix_sock_count) {
-		for (i = scm->fp->count - 1; i >= 0; i--)
-			unix_inflight(scm->fp->fp[i]);
-	}
+	for (i = scm->fp->count - 1; i >= 0; i--)
+		unix_inflight(scm->fp->fp[i]);
 	return max_level;
 }
 
@@ -2144,14 +2201,12 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 		memset(&tmp_scm, 0, sizeof(tmp_scm));
 	}
 
-	err = mutex_lock_interruptible(&u->readlock);
-	if (unlikely(err)) {
-		/* recvmsg() in non blocking mode is supposed to return -EAGAIN
-		 * sk_rcvtimeo is not honored by mutex_lock_interruptible()
-		 */
-		err = noblock ? -EAGAIN : -ERESTARTSYS;
-		goto out;
-	}
+	mutex_lock(&u->readlock);
+
+	if (flags & MSG_PEEK)
+		skip = sk_peek_offset(sk, flags);
+	else
+		skip = 0;
 
 	do {
 		int chunk;
@@ -2231,19 +2286,18 @@ again:
 #endif
 				}
 			}
-			if (signal_pending(current)
-			    ||  mutex_lock_interruptible(&u->readlock)) {
+			if (signal_pending(current)) {
 				err = sock_intr_errno(timeo);
 				goto out;
 			}
 
+			mutex_lock(&u->readlock);
 			continue;
  unlock:
 			unix_state_unlock(sk);
 			break;
 		}
 
-		skip = sk_peek_offset(sk, flags);
 		while (skip >= unix_skb_len(skb)) {
 			skip -= unix_skb_len(skb);
 			last = skb;
@@ -2307,6 +2361,16 @@ again:
 
 			sk_peek_offset_fwd(sk, chunk);
 
+			if (UNIXCB(skb).fp)
+				break;
+
+			skip = 0;
+			last = skb;
+			unix_state_lock(sk);
+			skb = skb_peek_next(skb, &sk->sk_receive_queue);
+			if (skb)
+				goto again;
+			unix_state_unlock(sk);
 			break;
 		}
 	} while (size);
@@ -2588,6 +2652,85 @@ static void unix_seq_stop(struct seq_file *seq, void *v)
 	spin_unlock(&unix_table_lock);
 }
 
+#ifdef CONFIG_MTK_NET_LOGGING
+static int unix_seq_show(struct seq_file *seq, void *v)
+{
+	if (v == SEQ_START_TOKEN)
+		seq_puts(seq,
+			 "Num       RefCount Protocol Flags    Type St    Inode PeerNode Path  PeerPath\n");
+	else {
+		struct sock *s = v;
+		struct unix_sock *u = unix_sk(s);
+
+		unix_state_lock(s);
+		if (u->peer != NULL) {
+			seq_printf(seq, "%pK: %08X %08X %08X %04X %02X %5lu %5lu",
+				   s,
+				   atomic_read(&s->sk_refcnt),
+				   0,
+				   s->sk_state == TCP_LISTEN ? __SO_ACCEPTCON : 0,
+				   s->sk_type,
+				   s->sk_socket ?
+				   (s->sk_state == TCP_ESTABLISHED ? SS_CONNECTED : SS_UNCONNECTED) :
+				   (s->sk_state == TCP_ESTABLISHED ? SS_CONNECTING : SS_DISCONNECTING),
+				   sock_i_ino(s),
+				   sock_i_ino(u->peer));
+		} else {
+			seq_printf(seq, "%pK: %08X %08X %08X %04X %02X %5lu %d",
+				   s,
+				   atomic_read(&s->sk_refcnt),
+				   0,
+				   s->sk_state == TCP_LISTEN ? __SO_ACCEPTCON : 0,
+				   s->sk_type,
+				   s->sk_socket ?
+				   (s->sk_state == TCP_ESTABLISHED ? SS_CONNECTED : SS_UNCONNECTED) :
+				   (s->sk_state == TCP_ESTABLISHED ? SS_CONNECTING : SS_DISCONNECTING),
+				   sock_i_ino(s),
+				   0);
+			}
+			if (u->addr) {
+				int i, len;
+
+				seq_putc(seq, ' ');
+				i = 0;
+				len = u->addr->len - sizeof(short);
+				if (!UNIX_ABSTRACT(s)) {
+					len--;
+				} else {
+					seq_putc(seq, '@');
+					i++;
+				}
+				for ( ; i < len; i++)
+					seq_putc(seq, u->addr->name->sun_path[i]);
+			}
+
+			if (u->peer != NULL) {
+				struct unix_sock *pu = unix_sk(u->peer);
+
+				if (pu->addr) {
+					int a, length;
+
+					seq_putc(seq, ' ');
+					seq_putc(seq, '*');
+					a = 0;
+					length = pu->addr->len - sizeof(short);
+					if (!UNIX_ABSTRACT(u->peer)) {
+							length--;
+					} else {
+							seq_putc(seq, '@');
+							a++;
+				}
+				for ( ; a < length; a++)
+						seq_putc(seq, pu->addr->name->sun_path[a]);
+				}
+}
+
+			unix_state_unlock(s);
+			seq_putc(seq, '\n');
+		}
+		return 0;
+}
+#else
 static int unix_seq_show(struct seq_file *seq, void *v)
 {
 
@@ -2631,6 +2774,7 @@ static int unix_seq_show(struct seq_file *seq, void *v)
 
 	return 0;
 }
+#endif
 
 static const struct seq_operations unix_seq_ops = {
 	.start  = unix_seq_start,

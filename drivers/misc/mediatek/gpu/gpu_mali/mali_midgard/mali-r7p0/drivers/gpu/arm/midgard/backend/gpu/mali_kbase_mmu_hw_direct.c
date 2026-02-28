@@ -27,7 +27,6 @@
 #include <backend/gpu/mali_kbase_device_internal.h>
 
 /* MTK */
-#include <ged_log.h>
 #include <platform/mtk_platform_common.h>
 
 static inline u64 lock_region(struct kbase_device *kbdev, u64 pfn,
@@ -78,16 +77,8 @@ static int wait_ready(struct kbase_device *kbdev,
 		val = kbase_reg_read(kbdev, MMU_AS_REG(as_nr, AS_STATUS), NULL);
 
 	if (max_loops == 0) {
-		dev_err(kbdev->dev, "AS_ACTIVE bit stuck\n");
-		ged_log_buf_print2(kbdev->mtk_log, GED_LOG_ATTR_TIME, "AS_ACTIVE bit stuck\n");
-		{
-			static int called = 0;
-			if (called == 0)
-			{
-				called = 1;
-				mtk_trigger_aee();
-			}
-		}
+		dev_MTK_err(kbdev->dev, "AS_ACTIVE bit stuck\n");
+		mtk_trigger_aee_report("AS_ACTIVE bit stuck");
 		return -1;
 	}
 

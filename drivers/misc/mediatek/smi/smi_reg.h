@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #ifndef _SMI_REG_H_
 #define _SMI_REG_H_
 
@@ -329,6 +342,9 @@
 #define SMI_LARB4_PORT_NUM  4
 #define SMI_LARB5_PORT_NUM  10
 #define SMI_LARB6_PORT_NUM  10
+
+#elif defined(SMI_BRINGUP)
+#define SMI_LARB_NR     1
 #endif
 
 #define SMI_LARB_STAT                   (0x0)

@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/module.h>
 #include <linux/wakelock.h>
 #include <linux/poll.h>
@@ -25,68 +38,6 @@ unsigned int curr_sim_mode[MAX_MD_NUM];
 struct ccci_dev_client *md_logger_client = NULL;
 static spinlock_t md_logger_lock;
 static unsigned int catch_more;
-
-#ifdef CONFIG_MTK_MD_SBP_CUSTOM_VALUE
-static unsigned int md_sbp_code;
-static unsigned int md_sbp_code_default;
-#endif				/* CONFIG_MTK_MD_SBP_CUSTOM_VALUE */
-#if 0
-#ifndef CONFIG_MODEM_FIRMWARE_CIP_PATH
-#define CONFIG_MODEM_FIRMWARE_CIP_PATH  "/custom/etc/firmware/"
-#endif
-
-#ifndef CONFIG_MODEM_FIRMWARE_PATH
-#define CONFIG_MODEM_FIRMWARE_PATH "/etc/firmware/"
-#endif
-
-static char *type_str[] = {[modem_invalid] = "invalid",
-	[modem_2g] = "2g",
-	[modem_3g] = "3g",
-	[modem_wg] = "wg",
-	[modem_tg] = "tg",
-};
-
-int scan_image_list(int md_id, char fmt[], unsigned int out_img_list[],
-		    int img_list_size)
-{
-	int i;
-	int img_num = 0;
-	char full_path[64] = { 0 };
-	char img_name[32] = { 0 };
-	struct file *filp = NULL;
-
-	for (i = 0; i < (sizeof(type_str) / sizeof(char *)); i++) {
-		snprintf(img_name, 32, fmt, md_id + 1, type_str[i]);
-		/*  Find at CIP first */
-		snprintf(full_path, 64, "%s%s", CONFIG_MODEM_FIRMWARE_CIP_PATH,
-			 img_name);
-		CCCI_MSG_INF(md_id, "chr", "Find:%s\n", full_path);
-		filp = filp_open(full_path, O_RDONLY, 0644);
-		if (IS_ERR(filp)) {
-			/*  Find at default */
-			snprintf(full_path, 64, "%s%s",
-				 CONFIG_MODEM_FIRMWARE_PATH, img_name);
-			CCCI_MSG_INF(md_id, "chr", "Find:%s\n", full_path);
-			filp = filp_open(full_path, O_RDONLY, 0644);
-			if (IS_ERR(filp)) {
-				CCCI_MSG_INF(md_id, "chr",
-					     "%s not found(%d,%d)\n", full_path,
-					     img_num, i);
-				continue;
-			}
-		}
-		/*  Run here means open image success */
-		filp_close(filp, NULL);
-		CCCI_MSG_INF(md_id, "chr", "Image:%s found\n", full_path);
-		if (img_num < img_list_size)
-			out_img_list[img_num] = i;
-		img_num++;
-	}
-	if (img_num < 1)
-		CCCI_ERR_INF(md_id, "chr", "Error! - No Image found\n");
-	return img_num;
-}
-#endif
 
 unsigned int __weak get_sim_switch_type(void)
 {
@@ -558,7 +509,7 @@ static long ccci_dev_compat_ioctl(struct file *filp, unsigned int cmd, unsigned 
 	int md_id = client->md_id;
 
 	if (!filp->f_op || !filp->f_op->unlocked_ioctl) {
-		CCCI_ERR_MSG(md_id, "chr", "dev_char_compat_ioctl(!filp->f_op || !filp->f_op->unlocked_ioctl)\n");
+		CCCI_ERR_INF(md_id, "chr", "dev_char_compat_ioctl(!filp->f_op || !filp->f_op->unlocked_ioctl)\n");
 		return -ENOTTY;
 	}
 	switch (cmd) {
@@ -566,7 +517,7 @@ static long ccci_dev_compat_ioctl(struct file *filp, unsigned int cmd, unsigned 
 	case CCCI_IOC_AP_ENG_BUILD:
 	case CCCI_IOC_GET_MD_MEM_SIZE:
 		{
-			CCCI_ERR_MSG(md_id, "chr", "dev_char_compat_ioctl deprecated cmd(%d)\n", cmd);
+			CCCI_ERR_INF(md_id, "chr", "dev_char_compat_ioctl deprecated cmd(%d)\n", cmd);
 			return 0;
 		}
 	default:
@@ -579,7 +530,7 @@ static long ccci_dev_compat_ioctl(struct file *filp, unsigned int cmd, unsigned 
 static int ccci_dev_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	int pfn, len = 0;
-	unsigned long addr;
+	unsigned long addr = 0;
 	struct ccci_dev_client *client =
 	    (struct ccci_dev_client *)file->private_data;
 	int md_id = client->md_id;
@@ -590,6 +541,9 @@ static int ccci_dev_mmap(struct file *file, struct vm_area_struct *vma)
 	} else if (client->ch_num == CCCI_MD_LOG_RX
 		   || client->ch_num == CCCI_MD_LOG_TX) {
 		ccci_mdlog_base_req(md_id, NULL, &addr, &len);
+	} else {
+		CCCI_ERR_INF(md_id, "chr", "ccci_dev_mmap not support ch=%d", client->ch_num);
+		return -CCCI_ERR_MD_NOT_READY;
 	}
 
 	CCCI_CHR_MSG(md_id, "remap addr:0x%lx len:%d  map-len:%lu\n", addr, len,
@@ -1319,26 +1273,6 @@ static long ccci_vir_chr_ioctl(struct file *file, unsigned int cmd,
 				     "CCCI_IOC_GET_MD_IMG_EXIST: copy_to_user fail!\n");
 			ret = -EFAULT;
 		}
-
-#if 0
-		memset(md_img_exist, 0, sizeof(md_img_exist));
-		scanned_num =
-		    scan_image_list(md_id, "modem_%d_%s_n.img", md_img_exist,
-				    MD_IMG_MAX_CNT);
-		if (scanned_num < 1) {
-			CCCI_MSG_INF(md_id, "chr",
-				     "CCCI_IOC_GET_MD_IMG_EXIST: scan md imfage fail!\n");
-			ret = -EFAULT;
-		} else {
-			if (copy_to_user
-			    ((void __user *)arg, &md_img_exist,
-			     sizeof(md_img_exist))) {
-				CCCI_MSG_INF(md_id, "chr",
-					     "CCCI_IOC_GET_MD_IMG_EXIST: copy_to_user fail!\n");
-				ret = -EFAULT;
-			}
-		}
-#endif
 		break;
 
 	case CCCI_IOC_GET_MD_TYPE:
@@ -1365,7 +1299,7 @@ static long ccci_vir_chr_ioctl(struct file *file, unsigned int cmd,
 				if (md_type_saving != get_modem_support(md_id))
 					CCCI_MSG_INF(md_id, "chr",
 						     "Maybe Wrong: md type storing not equal with current setting!(%d %d)\n",
-						     md_type,
+						     md_type_saving,
 						     get_modem_support(md_id));
 				/* Notify md_init daemon to store md type in nvram */
 				ccci_system_message(md_id,
@@ -1413,55 +1347,6 @@ static long ccci_vir_chr_ioctl(struct file *file, unsigned int cmd,
 			CCCI_MSG_INF(md_id, "chr", "send signal %d to rild %d ret=%ld\n", sig, pid, ret);
 		}
 		break;
-
-#ifdef CONFIG_MTK_MD_SBP_CUSTOM_VALUE
-	case CCCI_IOC_GET_MD_SBP_CFG:
-		CCCI_MSG_INF(md_id, "chr", "SBP confg length:%d!\n",
-			     strlen(CONFIG_MTK_MD_SBP_CUSTOM_VALUE));
-		if (strlen(CONFIG_MTK_MD_SBP_CUSTOM_VALUE) > 0) {
-			if (!md_sbp_code_default) {
-				int tmpret =
-				    kstrtouint(CONFIG_MTK_MD_SBP_CUSTOM_VALUE,
-					       0, &md_sbp_code_default);
-				if (!tmpret) {
-					CCCI_MSG_INF(md_id, "chr",
-						     "GET_MD_SBP_CFG: get config sbp code:%d!\n",
-						     md_sbp_code_default);
-				} else {
-					CCCI_MSG_INF(md_id, "chr",
-						     "GET_MD_SBP_CFG: get config sbp code fail! ret:%d, Config val:%s\n",
-						     tmpret,
-						     CONFIG_MTK_MD_SBP_CUSTOM_VALUE);
-				}
-			} else {
-				CCCI_MSG_INF(md_id, "chr",
-					     "GET_MD_SBP_CFG: config sbp code:%d!\n",
-					     md_sbp_code_default);
-			}
-
-			ret =
-			    put_user(md_sbp_code_default,
-				     (unsigned int __user *)arg);
-
-		} else {
-			ret = -ENOTTY;
-		}
-		break;
-
-	case CCCI_IOC_SET_MD_SBP_CFG:
-		if (copy_from_user
-		    (&md_sbp_code, (void __user *)arg, sizeof(unsigned int))) {
-			CCCI_MSG_INF(md_id, "chr",
-				     "SET_MD_SBP_CFG: copy_from_user fail!\n");
-			ret = -EFAULT;
-		} else {
-			CCCI_MSG_INF(md_id, "chr",
-				     "SET_MD_SBP_CFG: set md sbp code:0x%x!\n",
-				     md_sbp_code);
-			ccci_set_md_sbp(md_id, md_sbp_code);
-		}
-		break;
-#endif				/*  CONFIG_MTK_MD_SBP_CUSTOM_VALUE */
 
 	default:
 		CCCI_MSG_INF(md_id, "chr", "illegal IOCTL %X called by %s\n",

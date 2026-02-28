@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/delay.h>
 #include <linux/kthread.h>
 #include <mt-plat/sync_write.h>
@@ -17,7 +30,9 @@
 #include <linux/of_address.h>
 #endif
 #include "ccci_off.h"
-
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+#include "include/pmic_api_buck.h"
+#endif
 #if !defined(CONFIG_MTK_CLKMGR)
 static struct clk *clk_scp_sys_md1_main;
 #endif
@@ -92,20 +107,15 @@ static void internal_md_power_down(void)
 	/* 3. Shutting off power domains except L1MCU by masking all ostimers control
 	on mtcmos power domain: */
 	sync_write32(ioread32(REG_MD_L1_TOPSM_SM_TMR_PWR0(md_l1_topsm_base))|~(0x1),
-		REG_MD_L1_TOPSM_SM_TMR_PWR0(md_p_topsm_base));
-	sync_write32(ioread32(REG_MD_L1_TOPSM_SM_TMR_PWR1(md_l1_topsm_base))|~(0x0),
-		REG_MD_L1_TOPSM_SM_TMR_PWR1(md_p_topsm_base));
-	sync_write32(ioread32(REG_MD_L1_TOPSM_SM_TMR_PWR2(md_l1_topsm_base))|~(0x0),
-		REG_MD_L1_TOPSM_SM_TMR_PWR2(md_p_topsm_base));
-	sync_write32(ioread32(REG_MD_L1_TOPSM_SM_TMR_PWR3(md_l1_topsm_base))|~(0x0),
-		REG_MD_L1_TOPSM_SM_TMR_PWR3(md_p_topsm_base));
-	sync_write32(ioread32(REG_MD_L1_TOPSM_SM_TMR_PWR4(md_l1_topsm_base))|~(0x0),
-		REG_MD_L1_TOPSM_SM_TMR_PWR4(md_p_topsm_base));
+		REG_MD_L1_TOPSM_SM_TMR_PWR0(md_l1_topsm_base));
+	sync_write32(0xFFFFFFFF, REG_MD_L1_TOPSM_SM_TMR_PWR1(md_l1_topsm_base));
+	sync_write32(0xFFFFFFFF, REG_MD_L1_TOPSM_SM_TMR_PWR2(md_l1_topsm_base));
+	sync_write32(0xFFFFFFFF, REG_MD_L1_TOPSM_SM_TMR_PWR3(md_l1_topsm_base));
+	sync_write32(0xFFFFFFFF, REG_MD_L1_TOPSM_SM_TMR_PWR4(md_l1_topsm_base));
 
 	/* 4. L1MCU power domain is shut off in the end
 	after all register sequence has been executed: */
-	sync_write32(ioread32(REG_MD_L1_TOPSM_SM_TMR_PWR0(md_l1_topsm_base))|~(0x0),
-		REG_MD_L1_TOPSM_SM_TMR_PWR0(md_p_topsm_base));
+	sync_write32(0xFFFFFFFF, REG_MD_L1_TOPSM_SM_TMR_PWR0(md_l1_topsm_base));
 
 	pr_notice("[ccci-off]8.power off ARM7, HSPAL2, LTEL2\n");
 	/* no need to poll, as MD SW didn't run and enter sleep mode, polling will not get result */
@@ -114,6 +124,9 @@ static void internal_md_power_down(void)
 #else
 	clk_disable_unprepare(clk_scp_sys_md1_main);
 #endif
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	vmd1_pmic_setting_off();
+#else
 	/* VMODEM off */
 	pmic_set_register_value(MT6351_PMIC_BUCK_VMODEM_VSLEEP_EN, 0); /* 0x063A[8]=0, 0:SW control, 1:HW control */
 	pmic_set_register_value(MT6351_PMIC_BUCK_VMODEM_EN, 0); /* 0x062C[0]=0, 0:Disable, 1:Enable */
@@ -123,7 +136,7 @@ static void internal_md_power_down(void)
 	/* VSRAM_MD off */
 	pmic_set_register_value(MT6351_PMIC_BUCK_VSRAM_MD_VSLEEP_EN, 0); /* 0x0662[8]=0, 0:SW control, 1:HW control */
 	pmic_set_register_value(MT6351_PMIC_BUCK_VSRAM_MD_EN, 0); /* 0x0654[0]=0, 0:Disable, 1:Enable */
-
+#endif
 	iounmap(md_p_topsm_base);
 	iounmap(md_l1_topsm_base);
 

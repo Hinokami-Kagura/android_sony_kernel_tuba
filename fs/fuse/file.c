@@ -6,13 +6,10 @@
   See the file COPYING.
 */
 
-#if defined(CONFIG_FUSE_IO_LOG)
-#define DEBUG 1
-#endif
-
 #include "fuse_i.h"
+//[CEI comment] fuse: Add support for passthrough read/write
 #include "fuse_passthrough.h"
-#include "fuse.h"
+#include "mt_fuse.h"
 
 #include <linux/pagemap.h>
 #include <linux/slab.h>
@@ -25,324 +22,11 @@
 #include <linux/falloc.h>
 #include <asm/div64.h>
 
-#ifdef FUSEIO_TRACE
-struct mutex fuse_iolog_lock;
-
-struct fuse_proc_info fuse_iolog[FUSE_IOLOG_MAX];
-struct task_struct *fuse_iolog_thread = NULL;
-
-void fuse_time_diff(struct timespec *start, struct timespec *end, struct timespec *diff)
-{
-	if ((end->tv_nsec-start->tv_nsec) < 0) {
-		diff->tv_sec = end->tv_sec-start->tv_sec-1;
-		diff->tv_nsec = 1000000000+end->tv_nsec-start->tv_nsec;
-	} else {
-		diff->tv_sec = end->tv_sec-start->tv_sec;
-		diff->tv_nsec = end->tv_nsec-start->tv_nsec;
-	}
-}
-
-struct fuse_ioiog_type_map {
-	int type;
-	const char *str;
-};
-
-#define FUSE_IOLOG_TYPE_MAX 46
-
-static const char *fuse_iolog_type[FUSE_IOLOG_TYPE_MAX] = {
-	"unknown",	/*0*/
-	"lookup",	/*1*/
-	"forget",	/*2*/
-	"getattr",	/*3*/
-	"setattr",	/*4*/
-	"readlink",	/*5*/
-	"symlink",	/*6*/
-	"",	/*7*/
-	"mknod",	/*8*/
-	"mkdir",	/*9*/
-	"unlink",	/*10*/
-	"rmdir",	/*11*/
-	"rename",	/*12*/
-	"link",	/*13*/
-	"open",	/*14*/
-	"read",	/*15*/
-	"write",	/*16*/
-	"statfs",	/*17*/
-	"release",	/*18*/
-	"",	/*19*/
-	"fsync",	/*20*/
-	"setxattr",	/*21*/
-	"getxattr",	/*22*/
-	"listxattr",	/*23*/
-	"removexattr",	/*24*/
-	"flush",	/*25*/
-	"init",	/*26*/
-	"opendir",	/*27*/
-	"readdir",	/*28*/
-	"releasedir",	/*29*/
-	"fsyncdir",	/*30*/
-	"getlk",	/*31*/
-	"setlk",	/*32*/
-	"setlkw",	/*33*/
-	"access",	/*34*/
-	"create",	/*35*/
-	"interrupt",	/*36*/
-	"bmap",	/*37*/
-	"destroy",	/*38*/
-	"ioctl",	/*39*/
-	"poll",	/*40*/
-	"notify_reply",	/*41*/
-	"batch_forget",	/*42*/
-	"fallocate", /*43*/
-	"readdirplus", /*44*/
-	"cuse"
-};
-
-static const char *fuse_iolog_type2str(int type)
-{
-	if (type >= 0 && type < FUSE_IOLOG_TYPE_MAX)
-		goto out;
-	else if (type == CUSE_INIT)
-		type = FUSE_IOLOG_TYPE_MAX-1;
-	else
-		type = 0;
-out:
-	return fuse_iolog_type[type];
-}
-
-static char fuse_iolog_buf[FUSE_IOLOG_BUFLEN];
-
-int fuse_iolog_print(void)
-{
-	int i, len, n;
-	char *ptr;
-
-	len = FUSE_IOLOG_BUFLEN-1;
-	ptr = &fuse_iolog_buf[0];
-
-	for (i = 0; i < FUSE_IOLOG_MAX && fuse_iolog[i].valid; i++) {
-
-		if (fuse_iolog[i].read.count || fuse_iolog[i].write.count) {
-			n = snprintf(ptr, len, "{%d:R(%d,%d,%d),W(%d,%d,%d)}",
-				fuse_iolog[i].pid,
-				fuse_iolog[i].read.bytes,
-				fuse_iolog[i].read.count,
-				fuse_iolog[i].read.us,
-				fuse_iolog[i].write.bytes,
-				fuse_iolog[i].write.count,
-				fuse_iolog[i].write.us);
-
-			len -= n;
-			ptr += n;
-
-			if (len < 0)
-				goto overflow;
-		}
-
-		if (fuse_iolog[i].misc_type) {
-			n = snprintf(ptr, len, "{%d:%s(%d,%d,%d)}",
-				fuse_iolog[i].pid,
-				fuse_iolog_type2str(fuse_iolog[i].misc_type),
-				fuse_iolog[i].misc.bytes,
-				fuse_iolog[i].misc.count,
-				fuse_iolog[i].misc.us);
-			len -= n;
-			ptr += n;
-
-			if (len < 0)
-				goto overflow;
-		}
-	}
-
-	if (i > 0)
-		pr_debug("[BLOCK_TAG] FUSEIO %s\n", &fuse_iolog_buf[0]);
-
-	return ptr - &fuse_iolog_buf[0];
-
-overflow:
-	pr_debug("[BLOCK_TAG] FUSEIO log buffer overflow\n");
-
-	return -1;
-}
-
-void fuse_iolog_proc_clear(void)
-{
-	memset(&fuse_iolog[0], 0, sizeof(struct fuse_proc_info)*FUSE_IOLOG_MAX);
-}
-
-inline __u32 fuse_iolog_timeus(struct timespec *t)
-{
-	__u32 _t;
-	long us;
-
-	us = t->tv_nsec;
-	do_div(us, 1000);
-
-	if (t->tv_sec > 3600)
-		return 0xD693A400; /* 3600000000 */
-
-	_t = t->tv_sec * 1000000 + us;
-
-	if (_t)
-		return _t;
-
-	return 1;
-}
-
-__u32 fuse_iolog_timeus_diff(struct timespec *start, struct timespec *end)
-{
-	struct timespec diff;
-
-	fuse_time_diff(start, end, &diff);
-	return fuse_iolog_timeus(&diff);
-}
-
-
-inline int fuse_iolog_proc_update(struct fuse_proc_info *info,
-	__u32 io_bytes, int type, struct timespec *diff)
-{
-	struct fuse_rw_info *rwi;
-	__u32 _t;
-
-	_t = fuse_iolog_timeus(diff);
-
-	if (type == FUSE_READ)
-		rwi = &info->read;
-	else if (type == FUSE_WRITE)
-		rwi = &info->write;
-	else {
-		if (info->misc_type == 0)
-			info->misc_type = type;
-		else if (info->misc_type != type) /* misc type mismatch => continue */
-			return -1;
-		rwi = &info->misc;
-	}
-
-	rwi->bytes += io_bytes;
-	rwi->us += _t;
-	rwi->count++;
-
-	return 0;
-}
-
-static int fuse_iolog_watch(void *arg)
-{
-	unsigned int timeout;
-	int n;
-	int empty = 0;  /* how many seconds that log is empty */
-
-	while (1) {
-		if (kthread_should_stop())
-			break;
-
-		/* log is empty for last 1 seconds => sleep till next io coming */
-		if (empty > 1) {
-				set_current_state(TASK_INTERRUPTIBLE);
-				schedule();
-		} else { /* otherwise, check 1 seconds later */
-			do {
-				set_current_state(TASK_INTERRUPTIBLE);
-				timeout = schedule_timeout(FUSE_IOLOG_LATENCY*HZ);
-			 } while (timeout);
-		}
-
-		mutex_lock(&fuse_iolog_lock);
-
-		n = fuse_iolog_print();
-
-		if (n > 0) {
-			fuse_iolog_proc_clear();
-			empty = 0;
-		} else {
-			empty++;
-		}
-
-		mutex_unlock(&fuse_iolog_lock);
-	}
-
-	return 0;
-}
-
-void fuse_iolog_init(void)
-{
-	int ret;
-
-	mutex_init(&fuse_iolog_lock);
-	mutex_lock(&fuse_iolog_lock);
-	fuse_iolog_proc_clear();
-	mutex_unlock(&fuse_iolog_lock);
-
-	fuse_iolog_thread = kthread_create(fuse_iolog_watch, NULL, "fuse_log");
-	if (IS_ERR(fuse_iolog_thread)) {
-		ret = PTR_ERR(fuse_iolog_thread);
-		pr_debug("[BLOCK_TAG] Fail to create fuse_log thread %d\n", ret);
-		fuse_iolog_thread = NULL;
-		goto out;
-	}
-out:
-	return;
-}
-
-void fuse_iolog_exit(void)
-{
-	kthread_stop(fuse_iolog_thread);
-}
-void fuse_iolog_add(__u32 io_bytes, int type,
-	struct timespec *start,
-	struct timespec *end)
-{
-	struct fuse_proc_info *info;
-	struct timespec diff;
-	pid_t pid;
-	int i;
-
-	pid = task_pid_nr(current);
-	fuse_time_diff(start, end, &diff);
-
-	mutex_lock(&fuse_iolog_lock);
-
-	for (i = 0; i < FUSE_IOLOG_MAX; i++)   {
-		info = &fuse_iolog[i];
-		if (info->valid) {
-			if (info->pid == pid) {
-				if (fuse_iolog_proc_update(info, io_bytes, type, &diff))
-					continue; /* ops mismatch */
-				else
-					goto out;
-			} else {
-				continue;
-			}
-		} else {
-			info->valid = 1;
-			info->pid = pid;
-			fuse_iolog_proc_update(info, io_bytes, type, &diff);
-			if (i == 0) {  /* this is the first entry, wake up the handler */
-				if (fuse_iolog_thread)
-					wake_up_process(fuse_iolog_thread);
-			}
-			goto out;
-		}
-	}
-
-	if (i == FUSE_IOLOG_MAX) {
-		fuse_iolog_print();
-		fuse_iolog_proc_clear();
-		info = &fuse_iolog[0];
-		info->valid = 1;
-		info->pid = pid;
-		fuse_iolog_proc_update(info, io_bytes, type, &diff);
-	}
-out:
-	mutex_unlock(&fuse_iolog_lock);
-}
-
-#endif
-
 static const struct file_operations fuse_direct_io_file_operations;
 
 static int fuse_send_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
-			  int opcode, struct fuse_open_out *outargp,
-			  struct file **passthrough_filpp)
+			 int opcode, struct fuse_open_out *outargp,
+			 struct file **passthrough_filpp)
 {
 	struct fuse_open_in inarg;
 	struct fuse_req *req;
@@ -364,13 +48,14 @@ static int fuse_send_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 	req->out.numargs = 1;
 	req->out.args[0].size = sizeof(*outargp);
 	req->out.args[0].value = outargp;
+	//[CEI comment] fuse: Add support for passthrough read/write
 	req->out.passthrough_filp = NULL;
 
 	fuse_request_send(fc, req);
 	err = req->out.h.error;
+	//[CEI comment] fuse: Add support for passthrough read/write
 	if (req->out.passthrough_filp != NULL)
 		*passthrough_filpp = req->out.passthrough_filp;
-
 	fuse_put_request(fc, req);
 
 	return err;
@@ -384,10 +69,12 @@ struct fuse_file *fuse_file_alloc(struct fuse_conn *fc)
 	if (unlikely(!ff))
 		return NULL;
 
+	//[CEI comment] fuse: Disable passthrough when mmap is called on a file
 	ff->passthrough_filp = NULL;
 	ff->passthrough_enabled = 0;
 	if (fc->passthrough)
 		ff->passthrough_enabled = 1;
+
 	ff->fc = fc;
 	ff->reserved_req = fuse_request_alloc(0);
 	if (unlikely(!ff->reserved_req)) {
@@ -483,6 +170,7 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 		 bool isdir)
 {
 	struct fuse_file *ff;
+	//[CEI comment] fuse: Add support for passthrough read/write
 	struct file *passthrough_filp = NULL;
 	int opcode = isdir ? FUSE_OPENDIR : FUSE_OPEN;
 
@@ -496,11 +184,13 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 		struct fuse_open_out outarg;
 		int err;
 
+		//[CEI comment] fuse: Add support for passthrough read/write
 		err = fuse_send_open(fc, nodeid, file, opcode, &outarg,
 				     &(passthrough_filp));
 		if (!err) {
 			ff->fh = outarg.fh;
 			ff->open_flags = outarg.open_flags;
+			//[CEI comment] fuse: Add support for passthrough read/write
 			ff->passthrough_filp = passthrough_filp;
 
 		} else if (err != -ENOSYS || isdir) {
@@ -621,6 +311,7 @@ void fuse_release_common(struct file *file, int opcode)
 	if (unlikely(!ff))
 		return;
 
+	//[CEI comment] fuse: Add support for passthrough read/write
 	fuse_passthrough_release(ff);
 
 	req = ff->reserved_req;
@@ -1288,6 +979,8 @@ static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 			return err;
 	}
 
+	//[CEI comment] fuse: Add support for passthrough read/write
+	//[CEI comment] fuse: Disable passthrough when mmap is called on a file
 	if (ff && ff->passthrough_enabled && ff->passthrough_filp)
 		ret_val = fuse_passthrough_read_iter(iocb, to);
 	else
@@ -1430,6 +1123,7 @@ static ssize_t fuse_fill_write_pages(struct fuse_req *req,
 		tmp = iov_iter_copy_from_user_atomic(page, ii, offset, bytes);
 		flush_dcache_page(page);
 
+		iov_iter_advance(ii, tmp);
 		if (!tmp) {
 			unlock_page(page);
 			page_cache_release(page);
@@ -1442,7 +1136,6 @@ static ssize_t fuse_fill_write_pages(struct fuse_req *req,
 		req->page_descs[req->num_pages].length = tmp;
 		req->num_pages++;
 
-		iov_iter_advance(ii, tmp);
 		count += tmp;
 		pos += tmp;
 		offset += tmp;
@@ -1525,6 +1218,7 @@ static ssize_t fuse_perform_write(struct file *file,
 static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 {
 	struct file *file = iocb->ki_filp;
+	//[CEI comment] fuse: Add support for passthrough read/write
 	struct fuse_file *ff = file->private_data;
 	struct address_space *mapping = file->f_mapping;
 	size_t count = iov_iter_count(from);
@@ -1565,6 +1259,8 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (err)
 		goto out;
 
+	//[CEI comment] fuse: Add support for passthrough read/write
+	//[CEI comment] fuse: Disable passthrough when mmap is called on a file
 	if (ff && ff->passthrough_enabled && ff->passthrough_filp) {
 		written = fuse_passthrough_write_iter(iocb, from);
 		goto out;
@@ -2460,8 +2156,10 @@ static const struct vm_operations_struct fuse_file_vm_ops = {
 
 static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	//[CEI comment] fuse: Disable passthrough when mmap is called on a file
 	struct fuse_file *ff = file->private_data;
 	ff->passthrough_enabled = 0;
+
 	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))
 		fuse_link_write_file(file);
 
@@ -2472,6 +2170,7 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int fuse_direct_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	//[CEI comment] fuse: Disable passthrough when mmap is called on a file
 	struct fuse_file *ff = file->private_data;
 	ff->passthrough_enabled = 0;
 	/* Can't provide the coherency needed for MAP_SHARED */

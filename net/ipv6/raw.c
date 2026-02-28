@@ -843,10 +843,9 @@ static int rawv6_sendmsg(struct kiocb *iocb, struct sock *sk,
 			opt = NULL;
 	}
 	if (!opt) {
-	    opt = txopt_get(np);
-	    opt_to_free = opt;
-    }
-
+		opt = txopt_get(np);
+		opt_to_free = opt;
+	}
 	if (flowlabel)
 		opt = fl6_merge_options(&opt_space, flowlabel, opt);
 	opt = ipv6_fixup_options(&opt_space, opt);
