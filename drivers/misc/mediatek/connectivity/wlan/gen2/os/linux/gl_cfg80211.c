@@ -150,7 +150,9 @@ typedef struct _PACKET_DROP_SETTING_V1_T {
 			UINT_64    STP:1;
 			UINT_64    XID:1;
 			UINT_64    others:1;
-			UINT_64    reserved:59;
+			UINT_64    STP_802_3:1;
+			UINT_64    CTP:1;
+			UINT_64    reserved:57;
 		} bits;
 		/* byte endian issue */
 		UINT_64   bytes;
